@@ -1,7 +1,7 @@
 //////////////////////////////////////////////////////////
-//				Wristband Project Firmware				//
-//				Written by Carlos Hernandez				//
-//				San Jose State University				//
+//              Wristband Project Firmware              //
+//              Written by Carlos Hernandez             //
+//              San Jose State University               //
 //////////////////////////////////////////////////////////
 
 #include <asf.h>
