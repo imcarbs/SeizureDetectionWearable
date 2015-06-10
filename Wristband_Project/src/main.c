@@ -97,6 +97,8 @@ void tc_init(void){
 	/*End TC0 Setup*/	
 	
 	//Enable Interrupt in NVIC
+	NVIC_DisableIRQ(TC0_IRQn);
+	NVIC_ClearPendingIRQ(TC0_IRQn);
 	NVIC_SetPriority(TC0_IRQn, 0);
 	NVIC_EnableIRQ(TC0_IRQn);
 	
