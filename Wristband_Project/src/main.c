@@ -9,8 +9,8 @@
 /* Define system clock source (See conf_clock.h) */
 
 //Global struct for accessing registers
-Pio *pioa_regs = PIOA;
-TcChannel *tc_regs = TC0;
+Pio *pioa_ptr = PIOA;
+Tc *tc_ptr = TC0;
 
 //function prototypes
 void enable_pio_clk(void);
@@ -22,14 +22,16 @@ void tc_init(void);
 void TC0_Handler(void){
 	
 	//toggle LED @ TC0 Frequency
-//	if(!(pioa_regs->PIO_PDSR & PIO_PA6)){
-//		pioa_regs->PIO_SODR = PIO_PA6;
-//	}
-//	else{
-	if((tc_regs->TC_SR & TC_SR_CPAS)){
-		pioa_regs->PIO_CODR = PIO_PA6;
+	//if PA6 is high, set to low
+	if(pioa_ptr->PIO_PDSR & PIO_PA6){
+		pioa_ptr->PIO_CODR = PIO_PA6;
 	}
-//	}
+	else{
+		pioa_ptr->PIO_SODR = PIO_PA6;
+	}
+	
+	//clear flag
+	tc_ptr->TC_CHANNEL[0].TC_SR;
 }
 
 //main function
@@ -69,33 +71,33 @@ void pio_init(void){
 
 	enable_pio_clk();
 	//enable pin PA6 as output (LED)
-	pioa_regs->PIO_OER = PIO_PA6;
+	pioa_ptr->PIO_OER = PIO_PA6;
 	
 	//set LED pin PA6 as low (LED is active low)
 //	pioa_regs->PIO_CODR = PIO_PA6;
 
 	//set LED pin PA6 as high (LED is active low)
-	pioa_regs->PIO_SODR = PIO_PA6;
+	pioa_ptr->PIO_SODR = PIO_PA6;
 }
 
 void tc_init(void){
 		
 	//set peripheral function for tc (B function) on pins PA0 & PA1
-	pioa_regs->PIO_ABCDSR[0] = PIO_ABCDSR_P0 | PIO_ABCDSR_P1;
-	pioa_regs->PIO_ABCDSR[1] = 0x00 | (0x00 << 1);
+	pioa_ptr->PIO_ABCDSR[0] = PIO_ABCDSR_P0 | PIO_ABCDSR_P1;
+	pioa_ptr->PIO_ABCDSR[1] = 0x00 | (0x00 << 1);
 	
 	//disable PIO control of PA0 & PA1 so TC can control pins
-	pioa_regs->PIO_PDR |= PIO_PA0 | PIO_PA1;
+	pioa_ptr->PIO_PDR |= PIO_PA0 | PIO_PA1;
 	
 	enable_tc_clk();
 	
 	/*TC0 Setup*/
 	//temporarily disable TC clk
-	tc_regs->TC_CCR = TC_CCR_CLKDIS;
+	tc_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKDIS;
 		
 	//set wave mode and to reset on match
 	//also set/clear muxed pin to toggle on RA & RC match (scope debugging)
-	tc_regs->TC_CMR = 
+	tc_ptr->TC_CHANNEL[0].TC_CMR = 
 		TC_CMR_WAVE
 		| TC_CMR_WAVSEL_UP_RC 
 		| TC_CMR_TCCLKS_TIMER_CLOCK4 // = 8Mhz * (1/128)
@@ -105,15 +107,15 @@ void tc_init(void){
 		| TC_CMR_BCPC_SET;
 	
 	//set period & duty cycle 
-	tc_regs->TC_RA = 0x0FFF; //duty cycle for TIOA
-	tc_regs->TC_RB = 0x0FFF; //duty cycle for TIOB
-	tc_regs->TC_RC = 0xFFFF; //period (for TIOA & TIOB)
+	tc_ptr->TC_CHANNEL[0].TC_RA = 0x7A12; //duty cycle for TIOA
+	tc_ptr->TC_CHANNEL[0].TC_RB = 0x7A12; //duty cycle for TIOB
+	tc_ptr->TC_CHANNEL[0].TC_RC = 0xF424; //period (for TIOA & TIOB)
 	
 	//enable interrupt on compare match
-	tc_regs->TC_IER = TC_IER_CPCS | TC_IER_CPAS;
+	tc_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
 	
 	//enable tc clock
-	tc_regs->TC_CCR = TC_CCR_CLKEN;	
+	tc_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;	
 	/*End TC0 Setup*/	
 	
 	//Enable Interrupt in NVIC
