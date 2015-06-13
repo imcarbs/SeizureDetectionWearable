@@ -8,7 +8,7 @@
 
 /* Define system clock source (See conf_clock.h) */
 
-//Global struct for accessing registers
+//Global structs for accessing registers
 Pio *pioa_ptr = PIOA;
 Tc *tc_ptr = TC0;
 
@@ -48,8 +48,12 @@ int main (void)
 
 void set_mck_source(void){
 	
-	//set main clock as source of master clock
-	PMC->PMC_MCKR = PMC_MCKR_CSS_MAIN_CLK;
+	//set slow clock as source of master clock
+	PMC->PMC_SCDR = PMC_SCER_PCK3;
+	PMC->PMC_PCK[PMC_PCK_3] =
+	(PMC->PMC_PCK[PMC_PCK_3] & ~PMC_PCK_CSS_Msk) | PMC_PCK_PRES_CLK_1;
+	while ((PMC->PMC_SCER & (PMC_SCER_PCK0 << PMC_PCK_3))
+	&& !(PMC->PMC_SR & (PMC_SR_PCKRDY0 << PMC_PCK_3)));
 	while(!(PMC->PMC_SR & PMC_SR_MCKRDY)){}
 }
 
@@ -89,38 +93,37 @@ void tc_init(void){
 	//disable PIO control of PA0 & PA1 so TC can control pins
 	pioa_ptr->PIO_PDR |= PIO_PA0 | PIO_PA1;
 	
+	//enable pmc periph clock for tc
 	enable_tc_clk();
 	
 	/*TC0 Setup*/
-	//temporarily disable TC clk
+	//temporarily disable TC clk input
 	tc_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKDIS;
 		
-	//set wave mode and to reset on match
-	//also set/clear muxed pin to toggle on RA & RC match (scope debugging)
+	//set wave mode and to reset on RC match
+	//also set muxed pin to toggle on RA & RC match (scope debugging)
 	tc_ptr->TC_CHANNEL[0].TC_CMR = 
 		TC_CMR_WAVE
 		| TC_CMR_WAVSEL_UP_RC 
 		| TC_CMR_TCCLKS_TIMER_CLOCK4 // = 8Mhz * (1/128)
-		| TC_CMR_ACPA_SET
-		| TC_CMR_ACPC_CLEAR
-		| TC_CMR_BCPB_CLEAR
-		| TC_CMR_BCPC_SET;
+		| TC_CMR_ACPA_TOGGLE
+		| TC_CMR_ACPC_TOGGLE
+		| TC_CMR_BCPB_TOGGLE
+		| TC_CMR_BCPC_TOGGLE;
 	
 	//set period & duty cycle 
-	tc_ptr->TC_CHANNEL[0].TC_RA = 0x7A12; //duty cycle for TIOA
-	tc_ptr->TC_CHANNEL[0].TC_RB = 0x7A12; //duty cycle for TIOB
-	tc_ptr->TC_CHANNEL[0].TC_RC = 0xF424; //period (for TIOA & TIOB)
+	tc_ptr->TC_CHANNEL[0].TC_RA = 0x8000; //duty cycle for TIOA
+	tc_ptr->TC_CHANNEL[0].TC_RB = 0x8000; //duty cycle for TIOB
+	tc_ptr->TC_CHANNEL[0].TC_RC = 0xFFFF; //period (for TIOA & TIOB)
 	
 	//enable interrupt on compare match
 	tc_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
 	
-	//enable tc clock
+	//enable tc clock & start tc
 	tc_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;	
 	/*End TC0 Setup*/	
 	
 	//Enable Interrupt in NVIC
-	NVIC_DisableIRQ(TC0_IRQn);
-	NVIC_ClearPendingIRQ(TC0_IRQn);
 	NVIC_SetPriority(TC0_IRQn, 0);
 	NVIC_EnableIRQ(TC0_IRQn);
 }
