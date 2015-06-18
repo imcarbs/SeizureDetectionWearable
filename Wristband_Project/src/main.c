@@ -86,6 +86,7 @@ void pio_init(void){
 }
 
 void tc_init(void){
+	
 		
 	//set peripheral function for tc (B function) on pin PA0
 	pioa_ptr->PIO_ABCDSR[0] |= PIO_ABCDSR_P0;
@@ -115,23 +116,24 @@ void tc_init(void){
 		| TC_CMR_ACPA_SET				//set PA0 on RA match
 		| TC_CMR_ACPC_CLEAR				//clear PA0 on RC match
 		| TC_CMR_BCPB_SET				//set PA1 on RB match
-		| TC_CMR_BCPC_CLEAR;			//clear PA0 on RC match
+		| TC_CMR_BCPC_CLEAR				//clear PA1 on RC match
+		| TC_CMR_BSWTRG_CLEAR;			//set PA1 on software trigger
 	
 	//set period & duty cycle 
-	tc_ptr->TC_CHANNEL[0].TC_RA = 0x47FF; //duty cycle for TIOA
-	tc_ptr->TC_CHANNEL[0].TC_RB = 0x47FF; //duty cycle for TIOB
-	tc_ptr->TC_CHANNEL[0].TC_RC = 0x8FFF; //period (for TIOA & TIOB)
+	tc_ptr->TC_CHANNEL[0].TC_RA = 0x0400; //duty cycle for TIOA
+	tc_ptr->TC_CHANNEL[0].TC_RB = 0x0400; //duty cycle for TIOB
+	tc_ptr->TC_CHANNEL[0].TC_RC = 0x0800; //period (for TIOA & TIOB)
 	
 	//enable interrupt on RC compare match
-	tc_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
+	tc_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPBS;
 	
 	//enable tc clock & start tc
 	tc_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;	
 	/*End TC0 Setup*/	
 	
 	//Enable Interrupt in NVIC
-	NVIC_DisableIRQ(TC0_IRQn);
-	NVIC_ClearPendingIRQ(TC0_IRQn);
+//	NVIC_DisableIRQ(TC0_IRQn);
+//	NVIC_ClearPendingIRQ(TC0_IRQn);
 	NVIC_SetPriority(TC0_IRQn, 0);
 	NVIC_EnableIRQ(TC0_IRQn);
 }
