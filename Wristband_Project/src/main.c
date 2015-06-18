@@ -87,13 +87,13 @@ void pio_init(void){
 void tc_init(void){
 		
 	//set peripheral function for tc (B function) on pins PA0 & PA1
-	pioa_ptr->PIO_ABCDSR[0] = PIO_ABCDSR_P0
+	pioa_ptr->PIO_ABCDSR[0] = PIO_ABCDSR_P0;
 	pioa_ptr->PIO_ABCDSR[0] |= PIO_ABCDSR_P1;
 	pioa_ptr->PIO_ABCDSR[1] = 0x0;
 	pioa_ptr->PIO_ABCDSR[1] |= (0x0 << 1);
 	
 	//disable PIO control of PA0 & PA1 so TC can control pins
-	pioa_ptr->PIO_PDR = PIO_PA0
+	pioa_ptr->PIO_PDR = PIO_PA0;
 	pioa_ptr->PIO_PDR = PIO_PA1;
 	
 	//enable pmc periph clock for tc
@@ -115,9 +115,9 @@ void tc_init(void){
 		| TC_CMR_BCPC_SET;
 	
 	//set period & duty cycle 
-	tc_ptr->TC_CHANNEL[0].TC_RA = 0x8000; //duty cycle for TIOA
-	tc_ptr->TC_CHANNEL[0].TC_RB = 0x8000; //duty cycle for TIOB
-	tc_ptr->TC_CHANNEL[0].TC_RC = 0xFFFF; //period (for TIOA & TIOB)
+	tc_ptr->TC_CHANNEL[0].TC_RA = 0x0400; //duty cycle for TIOA
+	tc_ptr->TC_CHANNEL[0].TC_RB = 0x0400; //duty cycle for TIOB
+	tc_ptr->TC_CHANNEL[0].TC_RC = 0x07FF; //period (for TIOA & TIOB)
 	
 	//enable interrupt on RC compare match
 	tc_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
