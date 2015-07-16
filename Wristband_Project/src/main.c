@@ -11,24 +11,70 @@
 //Global structs for accessing registers
 Pio *pioa_ptr = PIOA;
 Tc *tc_ptr = TC0;
+Adc *adc_ptr = ADC;
+
+int test_value = 0;
+
 
 //function prototypes
 void enable_pio_clk(void);
 void enable_tc_clk(void);
+void enable_adc_clk(void);
 void set_mck_source(void);
 void pio_init(void);
 void tc_init(void);
+void adc_init(void);
 
 void TC0_Handler(void){
 	
 	//toggle LED @ TC0 Frequency
 	//if PA6 is high, set to low
-	if(pioa_ptr->PIO_PDSR & PIO_PA6){
-		pioa_ptr->PIO_CODR = PIO_PA6;
-	}
-	//else set to high
+// 	if(pioa_ptr->PIO_PDSR & PIO_PA6){
+// 		pioa_ptr->PIO_CODR = PIO_PA6;
+// 	}
+// 	//else set to high
+// 	else{
+// 		pioa_ptr->PIO_SODR = PIO_PA6;
+// 	}
+		if(pioa_ptr->PIO_PDSR & PIO_PA2){
+			//get adc current reading
+			adc_ptr->ADC_CR = ADC_CR_START;
+			test_value = adc_ptr->ADC_CDR[1];
+		
+			//check if ADC reads more than 2/3*Vcc, light up LED
+			if( test_value > 600 ){
+			
+				//set LED pin PA6 as low (LED is active low)
+				pioa_ptr->PIO_CODR = PIO_PA6;
+				test_value = 0;
+			}
+		
+			else{
+			
+				//set LED pin PA6 as high (LED is active low)
+				pioa_ptr->PIO_SODR = PIO_PA6;
+				test_value = 0;
+			}	
+		}
 	else{
-		pioa_ptr->PIO_SODR = PIO_PA6;
+			//get adc current reading
+			adc_ptr->ADC_CR = ADC_CR_START;
+			test_value = adc_ptr->ADC_CDR[0];
+			
+			//check if ADC reads more than 2/3*Vcc, light up LED
+			if( test_value > 2000 ){
+				
+				//set LED pin PA6 as low (LED is active low)
+				pioa_ptr->PIO_CODR = PIO_PA6;
+				test_value = 0;
+			}
+			
+			else{
+				
+				//set LED pin PA6 as high (LED is active low)
+				pioa_ptr->PIO_SODR = PIO_PA6;
+				test_value = 0;
+			}		
 	}
 	
 	//clear flag
@@ -43,8 +89,29 @@ int main (void)
 //	set_mck_source();
 	pio_init();
 	tc_init();
+	adc_init();
+
 	
-	while (1) {}
+	while (1) {
+		
+// 		//get adc current reading
+// 		test_value = adc_ptr->ADC_CDR[0];
+// 		
+// 		//check if ADC reads more than 2/3*Vcc, light up LED
+// 		if( test_value > 2000 ){
+// 			
+// 			//set LED pin PA6 as low (LED is active low)
+// 			pioa_ptr->PIO_CODR = PIO_PA6;
+// 			test_value = 0;
+// 		}
+// 		
+// 		else{
+// 			
+// 			//set LED pin PA6 as high (LED is active low)
+// 			pioa_ptr->PIO_SODR = PIO_PA6;
+// 			test_value = 0;
+// 		}
+	}
 }
 
 void set_mck_source(void){
@@ -72,6 +139,12 @@ void enable_tc_clk(void){
 	//enable TC clock (ID: 23) in PMC
 	PMC->PMC_PCER0 |= PMC_PCER0_PID23;
 }
+
+void enable_adc_clk(void){
+	
+	//enable ADC clock (ID: 29)
+	PMC->PMC_PCER0 |= PMC_PCER0_PID29;
+}
 void pio_init(void){
 
 	enable_pio_clk();
@@ -83,6 +156,10 @@ void pio_init(void){
 
 	//set LED pin PA6 as high (LED is active low)
 	pioa_ptr->PIO_SODR |= PIO_PA6;
+	
+	//enable switch
+	pioa_ptr->PIO_PUER |= PIO_PA2;
+	pioa_ptr->PIO_PER |= PIO_PA2;
 }
 
 void tc_init(void){
@@ -112,15 +189,16 @@ void tc_init(void){
 		TC_CMR_WAVE						//set TC for wave mode
 		| TC_CMR_WAVSEL_UP_RC			//count up to RC value
 		| TC_CMR_TCCLKS_TIMER_CLOCK4	// = 8Mhz (Master Clock) * (1/128)
+		| TC_CMR_EEVT_XC0				//set xc0 so TIOB is not used as input
 		| TC_CMR_ACPA_SET				//set PA0 on RA match
 		| TC_CMR_ACPC_CLEAR				//clear PA0 on RC match
 		| TC_CMR_BCPB_SET				//set PA1 on RB match
 		| TC_CMR_BCPC_CLEAR;			//clear PA0 on RC match
 	
 	//set period & duty cycle 
-	tc_ptr->TC_CHANNEL[0].TC_RA = 0x47FF; //duty cycle for TIOA
-	tc_ptr->TC_CHANNEL[0].TC_RB = 0x47FF; //duty cycle for TIOB
-	tc_ptr->TC_CHANNEL[0].TC_RC = 0x8FFF; //period (for TIOA & TIOB)
+	tc_ptr->TC_CHANNEL[0].TC_RA = 0x17FF; //duty cycle for TIOA
+	tc_ptr->TC_CHANNEL[0].TC_RB = 0x17FF; //duty cycle for TIOB
+	tc_ptr->TC_CHANNEL[0].TC_RC = 0x2FFF; //period (for TIOA & TIOB)
 	
 	//enable interrupt on RC compare match
 	tc_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
@@ -136,4 +214,25 @@ void tc_init(void){
 	NVIC_EnableIRQ(TC0_IRQn);
 }
 
+void adc_init(void){
+	
+	//set prescaler for ADC clk
+	adc_ptr->ADC_MR = ADC_MR_TRACKTIM(490) | ADC_MR_TRANSFER(2) | ADC_MR_PRESCAL(255);
+	
+	//enable ADC channel 0
+	adc_ptr->ADC_CHER = ADC_CHER_CH0;
+	
+	//enable ADC channel 1
+	adc_ptr->ADC_CHER = ADC_CHER_CH1;
+	
+	//enable adc clk
+	enable_adc_clk();
+	
+	//Start ADC conversion
+	
+	
+	//read data register
+	//adc_ptr->ADC_CDR[0]
+	
+}
 
