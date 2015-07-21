@@ -219,10 +219,10 @@ void adc_init(void){
 	//set prescaler for ADC clk
 	adc_ptr->ADC_MR = ADC_MR_TRACKTIM(490) | ADC_MR_TRANSFER(2) | ADC_MR_PRESCAL(255);
 	
-	//enable ADC channel 0
+	//enable ADC channel 0 (PA17 - EDA sensor)
 	adc_ptr->ADC_CHER = ADC_CHER_CH0;
 	
-	//enable ADC channel 1
+	//enable ADC channel 1 (PA18 - EMG sensor)
 	adc_ptr->ADC_CHER = ADC_CHER_CH1;
 	
 	//enable adc clk
