@@ -26,55 +26,48 @@ void tc_init(void);
 void adc_init(void);
 
 void TC0_Handler(void){
-	
-	//toggle LED @ TC0 Frequency
-	//if PA6 is high, set to low
-// 	if(pioa_ptr->PIO_PDSR & PIO_PA6){
-// 		pioa_ptr->PIO_CODR = PIO_PA6;
-// 	}
-// 	//else set to high
-// 	else{
-// 		pioa_ptr->PIO_SODR = PIO_PA6;
-// 	}
-		if(pioa_ptr->PIO_PDSR & PIO_PA2){
-			//get adc current reading
-			adc_ptr->ADC_CR = ADC_CR_START;
-			test_value = adc_ptr->ADC_CDR[1];
+
+	//check if button is pressed
+	if(pioa_ptr->PIO_PDSR & PIO_PA2){
 		
-			//check if ADC reads more than 2/3*Vcc, light up LED
-			if( test_value > 600 ){
-			
-				//set LED pin PA6 as low (LED is active low)
-				pioa_ptr->PIO_CODR = PIO_PA6;
-				test_value = 0;
-			}
+		//get adc channel 1current reading
+		adc_ptr->ADC_CR = ADC_CR_START;
+		test_value = adc_ptr->ADC_CDR[1];
 		
-			else{
+		//check if ADC reads more than(600/4095)*Vcc, light up LED
+		if( test_value > 600 ){
 			
-				//set LED pin PA6 as high (LED is active low)
-				pioa_ptr->PIO_SODR = PIO_PA6;
-				test_value = 0;
-			}	
+			//set LED pin PA6 as low (LED is active low)
+			pioa_ptr->PIO_CODR = PIO_PA6;
+			test_value = 0;
 		}
+		
+		else{
+			
+			//set LED pin PA6 as high (LED is active low)
+			pioa_ptr->PIO_SODR = PIO_PA6;
+			test_value = 0;
+		}	
+	}
 	else{
-			//get adc current reading
-			adc_ptr->ADC_CR = ADC_CR_START;
-			test_value = adc_ptr->ADC_CDR[0];
+		//get adc channel 0 current reading
+		adc_ptr->ADC_CR = ADC_CR_START;
+		test_value = adc_ptr->ADC_CDR[0];
 			
-			//check if ADC reads more than 2/3*Vcc, light up LED
-			if( test_value > 2000 ){
+		//check if ADC reads more than (2000/4095)*Vcc, light up LED
+		if( test_value > 2000 ){
 				
-				//set LED pin PA6 as low (LED is active low)
-				pioa_ptr->PIO_CODR = PIO_PA6;
-				test_value = 0;
-			}
+			//set LED pin PA6 as low (LED is active low)
+			pioa_ptr->PIO_CODR = PIO_PA6;
+			test_value = 0;
+		}
 			
-			else{
+		else{
 				
-				//set LED pin PA6 as high (LED is active low)
-				pioa_ptr->PIO_SODR = PIO_PA6;
-				test_value = 0;
-			}		
+			//set LED pin PA6 as high (LED is active low)
+			pioa_ptr->PIO_SODR = PIO_PA6;
+			test_value = 0;
+		}		
 	}
 	
 	//clear flag
@@ -157,8 +150,9 @@ void pio_init(void){
 	//set LED pin PA6 as high (LED is active low)
 	pioa_ptr->PIO_SODR |= PIO_PA6;
 	
-	//enable switch
+	//enable switch (pull up resistor) [PA2]
 	pioa_ptr->PIO_PUER |= PIO_PA2;
+	//enable switch pin control by PIO [PA2]
 	pioa_ptr->PIO_PER |= PIO_PA2;
 }
 
