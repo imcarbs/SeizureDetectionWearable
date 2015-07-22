@@ -20,10 +20,12 @@ int emg_voltage = 0;
 void enable_pio_clk(void);
 void enable_tc_clk(void);
 void enable_adc_clk(void);
+void enable_i2c_clk(void);
 void set_mck_source(void);
 void pio_init(void);
 void tc_init(void);
 void adc_init(void);
+void i2c_init(void);
 
 void TC0_Handler(void){
 	
@@ -35,18 +37,15 @@ void TC0_Handler(void){
 	eda_voltage = adc_ptr->ADC_CDR[0];
 	emg_voltage = adc_ptr->ADC_CDR[1];
 	
-	//check if ADC reads more than threshold, turn on buzzer
+	//if ADC reads more than threshold, turn on buzzer
 	if( (eda_voltage > 3000) || (emg_voltage > 3000) ){
 			
-		//set PA1 to toggle (buzzer is turned on)
-//		tc_ptr->TC_CHANNEL[0].TC_CMR |= TC_CMR_BCPB_SET;		//set PA1 on RB match
 		tc_ptr->TC_CHANNEL[0].TC_RB = 7500; // 50% duty cycle for TIOB (max buzzer volume)
 		eda_voltage = 0;
 		emg_voltage = 0;
 	}
 	
 	else{
-//		tc_ptr->TC_CHANNEL[0].TC_CMR |= TC_CMR_BCPB_CLEAR;		//clr. PA1 on RB match
 		tc_ptr->TC_CHANNEL[0].TC_RB = 0x0000; //0% duty cycle for TIOB (buzzer off)
 		eda_voltage = 0;
 		emg_voltage = 0;
@@ -66,27 +65,8 @@ int main (void)
 	tc_init();
 	adc_init();
 
-	
-	while (1) {
-		
-// 		//get adc current reading
-// 		test_value = adc_ptr->ADC_CDR[0];
-// 		
-// 		//check if ADC reads more than 2/3*Vcc, light up LED
-// 		if( test_value > 2000 ){
-// 			
-// 			//set LED pin PA6 as low (LED is active low)
-// 			pioa_ptr->PIO_CODR = PIO_PA6;
-// 			test_value = 0;
-// 		}
-// 		
-// 		else{
-// 			
-// 			//set LED pin PA6 as high (LED is active low)
-// 			pioa_ptr->PIO_SODR = PIO_PA6;
-// 			test_value = 0;
-// 		}
-	}
+	//empty while loop to run SAMG55 indefinitely
+	while (1) {}
 }
 
 void set_mck_source(void){
@@ -119,6 +99,12 @@ void enable_adc_clk(void){
 	
 	//enable ADC clock (ID: 29)
 	PMC->PMC_PCER0 |= PMC_PCER0_PID29;
+}
+
+void enable_i2c_clk(void){
+	
+	//enable I2C clock (ID: )
+	PMC->PMC_PCER0 |= PMC_PCER0_PID;
 }
 void pio_init(void){
 
@@ -201,7 +187,13 @@ void adc_init(void){
 	//enable ADC channel 1 (PA18 - EMG sensor)
 	adc_ptr->ADC_CHER = ADC_CHER_CH1;
 	
+	//enable ADC channel 2 (PA19 - Heart rate sensor)
+//	adc_ptr->ADC_CHER = ADC_CHER_CH2;
+	
 	//enable adc clk
 	enable_adc_clk();	
 }
 
+void i2c_init(void){
+	
+}
