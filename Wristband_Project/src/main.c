@@ -43,7 +43,7 @@ void TC0_Handler(void){
 	emg_voltage = adc_ptr->ADC_CDR[1];
 	
 	//if ADC reads more than threshold, turn on buzzer
-	if( (eda_voltage > 3000) || (emg_voltage > 3000) ){
+	if( (eda_voltage > 3500) || (emg_voltage > 125) ){
 			
 		tc_ptr->TC_CHANNEL[0].TC_RB = 7500; // 50% duty cycle for TIOB (max buzzer volume)
 		eda_voltage = 0;
@@ -121,6 +121,7 @@ void enable_spi_clk(void){
 void pio_init(void){
 
 	enable_pio_clk();
+	
 	//enable pin PA6 as output (LED)
 	pioa_ptr->PIO_OER |= PIO_PA6;
 	
@@ -228,9 +229,9 @@ void spi_init(void){
 	piob_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P0;
 	piob_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P0;	
 		
-// 	//set peripheral function for SPI (A function) on pin PA25 (REQN)
-// 	pioa_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P25;
-// 	pioa_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P25;
+ 	//set peripheral function for SPI (A function) on pin PA25 (CS)
+ 	pioa_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P25;
+ 	pioa_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P25;
 // 
 // 	//set peripheral function for SPI (A function) on pin PA26 (RDYN)
 // 	pioa_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P26;
@@ -240,14 +241,14 @@ void spi_init(void){
 	pioa_ptr->PIO_PDR |= PIO_PA9;
 	piob_ptr->PIO_PDR |= PIO_PB0;
 	pioa_ptr->PIO_PDR |= PIO_PA10;
-//	pioa_ptr->PIO_PDR |= PIO_PA25;
+	pioa_ptr->PIO_PDR |= PIO_PA25;
 //	pioa_ptr->PIO_PDR |= PIO_PA26;
 	
 	//enable pin PA25 as output (REQN)
-	pioa_ptr->PIO_OER |= PIO_PA25;
+//	pioa_ptr->PIO_OER |= PIO_PA25;
 	
 	//set pin PA25 to high (REQN active low)
-	pioa_ptr->PIO_SODR |= PIO_PA25;
+//	pioa_ptr->PIO_SODR |= PIO_PA25;
 	
 	//enable pin PA26 as input (RDYN)
 	pioa_ptr->PIO_PER |= PIO_PA26;
@@ -263,10 +264,13 @@ void spi_init(void){
 
 	//set as master, use peripheral clock
 	spi_ptr->SPI_MR = SPI_MR_MSTR | SPI_MR_BRSRCCLK_PERIPH_CLK
-					  | SPI_MR_MODFDIS;
+					  | SPI_MR_MODFDIS | SPI_MR_PCS(1);
+					  
+	//add zeroes to mr
 	
 	//16-bit transfer
-	spi_ptr->SPI_CSR[0] = SPI_CSR_NCPHA | SPI_CSR_BITS_16_BIT;	
+	spi_ptr->SPI_CSR[0] = SPI_CSR_CPOL | SPI_CSR_NCPHA
+						  | SPI_CSR_BITS_16_BIT;	
 	
 	//enable SPI
 	spi_ptr->SPI_CR = SPI_CR_SPIEN;	
