@@ -6,8 +6,6 @@
 
 #include <asf.h>
 
-/* Define system clock source (See conf_clock.h) */
-
 //Global structs for accessing registers
 Pio *pioa_ptr = PIOA;
 Pio *piob_ptr = PIOB;
@@ -25,12 +23,12 @@ void enable_tc_clk(void);
 void enable_adc_clk(void);
 void enable_i2c_clk(void);
 void enable_spi_clk(void);
-void set_mck_source(void);
 void pio_init(void);
 void tc_init(void);
 void adc_init(void);
 void i2c_init(void);
 void spi_init(void);
+int voltage_to_adc(float voltage);
 
 void TC0_Handler(void){
 	
@@ -43,7 +41,7 @@ void TC0_Handler(void){
 	emg_voltage = adc_ptr->ADC_CDR[1];
 	
 	//if ADC reads more than threshold, turn on buzzer
-	if( (eda_voltage > 3500) || (emg_voltage > 125) ){
+	if( (eda_voltage > voltage_to_adc(2.821)) || (emg_voltage > voltage_to_adc(0.101)) ){
 			
 		tc_ptr->TC_CHANNEL[0].TC_RB = 7500; // 50% duty cycle for TIOB (max buzzer volume)
 		eda_voltage = 0;
@@ -63,26 +61,17 @@ void TC0_Handler(void){
 //main function
 int main (void)
 {
-	//Init. system clock
+	//Init. system clock (PLLA aka 120 Mhz)
+	//Uses EXTERNAL crystal oscillator
+	//can be switched by redefining "CONFIG_SYSCLK_SOURCE"
+	//see conf_clock.h for possible clock sources
 	sysclk_init();
-//	set_mck_source();
 	pio_init();
 	tc_init();
 	adc_init();
 
 	//empty while loop to run SAMG55 indefinitely
 	while (1) {}
-}
-
-void set_mck_source(void){
-	
-	//set slow clock as source of master clock
-	PMC->PMC_SCDR = PMC_SCER_PCK3;
-	PMC->PMC_PCK[PMC_PCK_3] =
-	(PMC->PMC_PCK[PMC_PCK_3] & ~PMC_PCK_CSS_Msk) | PMC_PCK_PRES_CLK_1;
-	while ((PMC->PMC_SCER & (PMC_SCER_PCK0 << PMC_PCK_3))
-	&& !(PMC->PMC_SR & (PMC_SR_PCKRDY0 << PMC_PCK_3)));
-	while(!(PMC->PMC_SR & PMC_SR_MCKRDY)){}
 }
 
 void enable_pio_clk(void){
@@ -114,8 +103,23 @@ void enable_i2c_clk(void){
 
 void enable_spi_clk(void){
 	
+	/* SPI will use main clock as source
+	b/c it is limited to 5 Mhz maximum */
+	
+	//disable PCK6 (for FLEXCOM0) to configure
+	PMC->PMC_SCDR = PMC_SCDR_PCK6;
+	
+	//set main clock as source for PCK0 (8Mhz) scale to 2Mhz
+	PMC->PMC_PCK[PMC_PCK_6] = PMC_PCK_CSS_MAIN_CLK | PMC_PCK_PRES_CLK_4;
+	
+	//enable PCK6
+	PMC->PMC_SCER = PMC_SCER_PCK6;
+	
+	//wait for PCK6 to be ready
+	while(!(PMC->PMC_SR & PMC_SR_PCKRDY6)){}
+
 	//enable SPI0 (a.k.a. FLEXCOM0) clk (ID: 8)
-	PMC->PMC_PCER0 |= PMC_PCER0_PID8;
+	//PMC->PMC_PCER0 |= PMC_PCER0_PID8;	
 }
 
 void pio_init(void){
@@ -206,8 +210,7 @@ void adc_init(void){
 	
 	//enable ADC channel 2 (PA19 - Heart rate sensor)
 //	adc_ptr->ADC_CHER = ADC_CHER_CH2;
-	
-	//enable adc clk
+
 	enable_adc_clk();	
 }
 
@@ -250,11 +253,11 @@ void spi_init(void){
 	//set pin PA25 to high (REQN active low)
 //	pioa_ptr->PIO_SODR |= PIO_PA25;
 	
-	//enable pin PA26 as input (RDYN)
-	pioa_ptr->PIO_PER |= PIO_PA26;
-	
-	//enable pin control by PIO (to use as RDYN) [PA26]
-	pioa_ptr->PIO_PER |= PIO_PA26;
+// 	//enable pin PA26 as input (RDYN)
+// 	pioa_ptr->PIO_PER |= PIO_PA26;
+// 	
+// 	//enable pin control by PIO (to use as RDYN) [PA26]
+// 	pioa_ptr->PIO_PER |= PIO_PA26;
 	
 	//set flexcom mode to SPI
 	fc_ptr->FLEXCOM_MR = FLEXCOM_MR_OPMODE_SPI;	
@@ -263,15 +266,43 @@ void spi_init(void){
 	//fc_ptr->FLEXCOM_THR;
 
 	//set as master, use peripheral clock
-	spi_ptr->SPI_MR = SPI_MR_MSTR | SPI_MR_BRSRCCLK_PERIPH_CLK
-					  | SPI_MR_MODFDIS | SPI_MR_PCS(1);
-					  
-	//add zeroes to mr
+	spi_ptr->SPI_MR = SPI_MR_MSTR | SPI_MR_BRSRCCLK_PMC_PCK
+					  | SPI_MR_PCS(1);
+	//set to fixed mode
+	spi_ptr->SPI_MR &= ~SPI_MR_PS;				  
+	//set to direct connection to peripheral				  
+	spi_ptr->SPI_MR &= ~SPI_MR_PCSDEC;
 	
-	//16-bit transfer
-	spi_ptr->SPI_CSR[0] = SPI_CSR_CPOL | SPI_CSR_NCPHA
-						  | SPI_CSR_BITS_16_BIT;	
+	//mode fault detection enable
+	spi_ptr->SPI_MR &= ~SPI_MR_MODFDIS;
+	
+	//local loopback disabled
+	spi_ptr->SPI_MR &= ~SPI_MR_LLB;
+	
+	//chip select settings
+	spi_ptr->SPI_CSR[0] = SPI_CSR_CPOL		//CPOL = 1
+						 | SPI_CSR_NCPHA	//NCPHA = 1
+				         | SPI_CSR_BITS_8_BIT	//8-bit transfers
+						 | SPI_CSR_CSNAAT	//chip select rise after transfer
+						 | SPI_CSR_SCBR(2);	
+						 
+	//clear CSAAT (programmable clock source)
+	spi_ptr->SPI_CSR[0] &= ~SPI_CSR_CSAAT;
 	
 	//enable SPI
 	spi_ptr->SPI_CR = SPI_CR_SPIEN;	
+	
+	//sample write operation
+	//spi_ptr->SPI_TDR = SPI_TDR_PCS(1) | SPI_TDR_TD(data)
+	//				   | SPI_TDR_LASTXFER;
+	
+	enable_spi_clk();
+}
+
+int voltage_to_adc(float voltage){
+	
+	//assuming 3.3v is max. value
+	//0v is min. value for adc
+	//returns bit value for adc
+	return ((int) (voltage * 4095)/3.3);
 }
