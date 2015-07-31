@@ -17,6 +17,9 @@ Flexcom *fc_ptr = FLEXCOM0;
 //Global variables
 int eda_voltage = 0;
 int emg_voltage = 0;
+int ecg_voltage = 0;
+int spi_init_timer = 0;
+int spi_init_timer_begin = 0;
 
 //function prototypes
 void enable_pio_clk(void);
@@ -41,6 +44,7 @@ void TC0_Handler(void){
 	adc_ptr->ADC_CR = ADC_CR_START;
 	eda_voltage = adc_ptr->ADC_CDR[0];
 	emg_voltage = adc_ptr->ADC_CDR[1];
+//	ecg_voltage = adc_ptr->ADC_CDR[2];
 	
 	//if ADC reads more than threshold, turn on buzzer
 	if( (eda_voltage > voltage_to_adc(2.821)) || (emg_voltage > voltage_to_adc(0.101)) ){
@@ -56,8 +60,25 @@ void TC0_Handler(void){
 		emg_voltage = 0;
 	}
 	
+	if(spi_init_timer != 5){
+		spi_init_timer++;
+	}
+	
+	if (spi_init_timer == 5){
+		spi_init_timer_begin = 1;
+	}
+	
 	//clear flag
 	tc_ptr->TC_CHANNEL[0].TC_SR;
+}
+
+void PIOB_Handler(void){
+
+	//set LED pin PA6 as low (LED is active low)
+	pioa_ptr->PIO_CODR = PIO_PA6;
+		
+	//clear flag
+	piob_ptr->PIO_ISR;
 }
 
 //main function
@@ -71,7 +92,8 @@ int main (void)
 	pio_init();
 	tc_init();
 	adc_init();
-
+	spi_init();
+	
 	//empty while loop to run SAMG55 indefinitely
 	while (1) {}
 }
@@ -108,20 +130,20 @@ void enable_spi_clk(void){
 	/* SPI will use main clock as source
 	b/c it is limited to 5 Mhz maximum */
 	
+	//enable SPI0 (a.k.a. FLEXCOM0) clk (ID: 8)
+	PMC->PMC_PCER0 |= PMC_PCER0_PID8;	
+	
 	//disable PCK6 (for FLEXCOM0) to configure
 	PMC->PMC_SCDR = PMC_SCDR_PCK6;
 	
 	//set main clock as source for PCK0 (8Mhz) scale to 2Mhz
-	PMC->PMC_PCK[PMC_PCK_6] = PMC_PCK_CSS_MAIN_CLK | PMC_PCK_PRES_CLK_4;
+	PMC->PMC_PCK[PMC_PCK_6] = PMC_PCK_CSS_MAIN_CLK | PMC_PCK_PRES_CLK_8;
 	
 	//enable PCK6
 	PMC->PMC_SCER = PMC_SCER_PCK6;
 	
 	//wait for PCK6 to be ready
 	while(!(PMC->PMC_SR & PMC_SR_PCKRDY6)){}
-
-	//enable SPI0 (a.k.a. FLEXCOM0) clk (ID: 8)
-	//PMC->PMC_PCER0 |= PMC_PCER0_PID8;	
 }
 
 void pio_init(void){
@@ -132,7 +154,7 @@ void pio_init(void){
 	pioa_ptr->PIO_OER |= PIO_PA6;
 	
 	//set LED pin PA6 as low (LED is active low)
-//	pioa_regs->PIO_CODR = PIO_PA6;
+//	pioa_ptr->PIO_CODR = PIO_PA6;
 
 	//set LED pin PA6 as high (LED is active low)
 	pioa_ptr->PIO_SODR |= PIO_PA6;
@@ -226,6 +248,8 @@ void spi_init(void){
 	//disable SPI to configure
 	spi_ptr->SPI_CR = SPI_CR_SPIDIS;
 	
+	enable_spi_clk();
+	
 	//set peripheral function A for SPI on pin PA09 (MISO/SDO)
 	pioa_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P9;
 	pioa_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P9;
@@ -241,8 +265,24 @@ void spi_init(void){
  	//set peripheral function A for SPI on pin PA25 (NPCS0/NSS/CS)
  	pioa_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P25;
  	pioa_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P25;
-
-	//disable PIO control of PA9, PB0 & PA10 so SPI0 can control pins
+	 
+	//enable PIO control of PB09 for use as input for INT1
+	piob_ptr->PIO_PER |= PIO_PB9;
+	
+	//enable interrupt on PB09
+	piob_ptr->PIO_IER |= PIO_PB9;
+	
+	//enable additional interrupt settings for PB09
+	piob_ptr->PIO_AIMER |= PIO_PB9;
+	
+	//enable edge detection for PB09
+	piob_ptr->PIO_ESR |= PIO_PB9;
+	
+	//set to detect rising edge for PB09 (INT1)
+	piob_ptr->PIO_REHLSR |= PIO_PB9;
+	
+	//disable PIO control of PA09, PB00, PA25, & PA10
+	//so SPI0 can control pins
 	pioa_ptr->PIO_PDR |= PIO_PA9;
 	piob_ptr->PIO_PDR |= PIO_PB0;
 	pioa_ptr->PIO_PDR |= PIO_PA10;
@@ -254,9 +294,9 @@ void spi_init(void){
 	//flexcom txdata register to hold SPI data (image)
 	//fc_ptr->FLEXCOM_THR;
 
-	//set as master, use peripheral clock
+	//set as master, use peripheral clock, mode fault disable
 	spi_ptr->SPI_MR = SPI_MR_MSTR | SPI_MR_BRSRCCLK_PMC_PCK
-					  | SPI_MR_PCS(1);
+					  | SPI_MR_PCS(1) |SPI_MR_MODFDIS;
 					  
 	//set to fixed peripheral mode
 	spi_ptr->SPI_MR &= ~SPI_MR_PS;			
@@ -264,18 +304,17 @@ void spi_init(void){
 	//set to direct connection to peripheral				  
 	spi_ptr->SPI_MR &= ~SPI_MR_PCSDEC;
 	
-	//mode fault detection enable
-	spi_ptr->SPI_MR &= ~SPI_MR_MODFDIS;
-	
 	//local loopback disabled
 	spi_ptr->SPI_MR &= ~SPI_MR_LLB;
 	
 	//chip select settings
 	spi_ptr->SPI_CSR[0] = SPI_CSR_CPOL		//CPOL = 1
 						 | SPI_CSR_NCPHA	//NCPHA = 1
-				         | SPI_CSR_BITS_8_BIT	//8-bit transfers
-						 | SPI_CSR_CSNAAT	//chip select rise after transfer
-						 | SPI_CSR_SCBR(2);	
+				         | SPI_CSR_BITS_16_BIT	//16-bit transfers
+						 | SPI_CSR_CSNAAT
+						 | SPI_CSR_SCBR(2)
+						 | SPI_CSR_DLYBS(0)
+						 | SPI_CSR_DLYBCT(0);	
 						 
 	//clear CSAAT (programmable clock source)
 	spi_ptr->SPI_CSR[0] &= ~SPI_CSR_CSAAT;
@@ -287,15 +326,30 @@ void spi_init(void){
 	//spi_ptr->SPI_TDR = SPI_TDR_PCS(1) | SPI_TDR_TD(data)
 	//				   | SPI_TDR_LASTXFER;
 	
-	enable_spi_clk();
+	//while (spi_init_timer_begin != 1){}
+		
+	adxl_init();
 }
 
 void adxl_init(void){
 	
-	//write to tdx
-	//spi_ptr->SPI_TDR = "Data";
+	//write to tdx (two MSB bits in write mode should be 0 & 0)
+	//0x310B 13-bit mode, +-16g
+	spi_ptr->SPI_TDR = SPI_TDR_TD(0x310B) | SPI_TDR_LASTXFER; 
 	
+	//wait until transaction is complete
+	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
+		
+	//0x2D08 Start Measurement
+	spi_ptr->SPI_TDR = SPI_TDR_TD(0x2D08) | SPI_TDR_LASTXFER;
+	
+	//wait until transaction is complete
+	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
+	
+	//0x2E80 Enable data_ready interrupt
+	spi_ptr->SPI_TDR = SPI_TDR_TD(0x2E80) | SPI_TDR_LASTXFER;
 }
+
 int voltage_to_adc(float voltage){
 	
 	//assuming 3.3v is max. value
