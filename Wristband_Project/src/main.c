@@ -40,7 +40,7 @@ void TC0_Handler(void){
 //check if button is pressed
 //if(pioa_ptr->PIO_PDSR & PIO_PA2)	
 	
-	//get adc channel 0 & 1 current reading
+	//get adc channels 0 & 1 current reading
 	adc_ptr->ADC_CR = ADC_CR_START;
 	eda_voltage = adc_ptr->ADC_CDR[0];
 	emg_voltage = adc_ptr->ADC_CDR[1];
@@ -52,12 +52,14 @@ void TC0_Handler(void){
 		tc_ptr->TC_CHANNEL[0].TC_RB = 7500; // 50% duty cycle for TIOB (max buzzer volume)
 		eda_voltage = 0;
 		emg_voltage = 0;
+		//edc_voltage = 0;
 	}
 	
 	else{
 		tc_ptr->TC_CHANNEL[0].TC_RB = 0x0000; //0% duty cycle for TIOB (buzzer off)
 		eda_voltage = 0;
 		emg_voltage = 0;
+		//edc_voltage = 0;
 	}
 	
 	if(spi_init_timer != 5){
@@ -68,7 +70,7 @@ void TC0_Handler(void){
 		spi_init_timer_begin = 1;
 	}
 	
-	//clear flag
+	//clear TC0 interrupt flags
 	tc_ptr->TC_CHANNEL[0].TC_SR;
 }
 
@@ -338,13 +340,13 @@ void adxl_init(void){
 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x310B) | SPI_TDR_LASTXFER; 
 	
 	//wait until transaction is complete
-	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
+//	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
 		
 	//0x2D08 Start Measurement
 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x2D08) | SPI_TDR_LASTXFER;
 	
 	//wait until transaction is complete
-	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
+//	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
 	
 	//0x2E80 Enable data_ready interrupt
 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x2E80) | SPI_TDR_LASTXFER;
