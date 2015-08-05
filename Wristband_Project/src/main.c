@@ -19,7 +19,7 @@ int eda_voltage = 0;
 int emg_voltage = 0;
 int ecg_voltage = 0;
 int spi_init_timer = 0;
-int spi_init_timer_begin = 0;
+volatile int spi_init_begin = 0;
 
 //function prototypes
 void enable_pio_clk(void);
@@ -62,12 +62,12 @@ void TC0_Handler(void){
 		//edc_voltage = 0;
 	}
 	
-	if(spi_init_timer != 5){
+	if(spi_init_timer != 100){
 		spi_init_timer++;
 	}
 	
-	if (spi_init_timer == 5){
-		spi_init_timer_begin = 1;
+	else {
+		spi_init_begin = 1;
 	}
 	
 	//clear TC0 interrupt flags
@@ -77,10 +77,10 @@ void TC0_Handler(void){
 void PIOB_Handler(void){
 
 	//set LED pin PA6 as low (LED is active low)
-	pioa_ptr->PIO_CODR = PIO_PA6;
+//	pioa_ptr->PIO_CODR = PIO_PA6;
 		
 	//clear flag
-	piob_ptr->PIO_ISR;
+//	piob_ptr->PIO_ISR;
 }
 
 //main function
@@ -138,8 +138,8 @@ void enable_spi_clk(void){
 	//disable PCK6 (for FLEXCOM0) to configure
 	PMC->PMC_SCDR = PMC_SCDR_PCK6;
 	
-	//set main clock as source for PCK0 (8Mhz) scale to 2Mhz
-	PMC->PMC_PCK[PMC_PCK_6] = PMC_PCK_CSS_MAIN_CLK | PMC_PCK_PRES_CLK_8;
+	//set main clock as source for PCK0 (8Mhz) scale to 8Mhz/32
+	PMC->PMC_PCK[PMC_PCK_6] = PMC_PCK_CSS_MAIN_CLK | PMC_PCK_PRES_CLK_16;
 	
 	//enable PCK6
 	PMC->PMC_SCER = PMC_SCER_PCK6;
@@ -213,7 +213,7 @@ void tc_init(void){
 	tc_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;	
 	/*End TC0 Setup*/	
 	
-	//Enable Interrupt in NVIC
+	//Enable TC0 Interrupt in NVIC
 	NVIC_DisableIRQ(TC0_IRQn);
 	NVIC_ClearPendingIRQ(TC0_IRQn);
 	NVIC_SetPriority(TC0_IRQn, 0);
@@ -271,6 +271,9 @@ void spi_init(void){
 	//enable PIO control of PB09 for use as input for INT1
 	piob_ptr->PIO_PER |= PIO_PB9;
 	
+	//disable output
+//	piob_ptr->PIO_ODR |= PIO_PB9;
+	
 	//enable interrupt on PB09
 	piob_ptr->PIO_IER |= PIO_PB9;
 	
@@ -298,58 +301,104 @@ void spi_init(void){
 
 	//set as master, use peripheral clock, mode fault disable
 	spi_ptr->SPI_MR = SPI_MR_MSTR | SPI_MR_BRSRCCLK_PMC_PCK
-					  | SPI_MR_PCS(1) |SPI_MR_MODFDIS;
+					  | SPI_MR_PCS(1) | SPI_MR_MODFDIS;
 					  
 	//set to fixed peripheral mode
 	spi_ptr->SPI_MR &= ~SPI_MR_PS;			
-		  
+
 	//set to direct connection to peripheral				  
 	spi_ptr->SPI_MR &= ~SPI_MR_PCSDEC;
-	
+
 	//local loopback disabled
 	spi_ptr->SPI_MR &= ~SPI_MR_LLB;
 	
 	//chip select settings
 	spi_ptr->SPI_CSR[0] = SPI_CSR_CPOL		//CPOL = 1
-						 | SPI_CSR_NCPHA	//NCPHA = 1
 				         | SPI_CSR_BITS_16_BIT	//16-bit transfers
-						 | SPI_CSR_CSNAAT
-						 | SPI_CSR_SCBR(2)
-						 | SPI_CSR_DLYBS(0)
+						 | SPI_CSR_SCBR(2)		//bit rate 1/2 pclk
+						 | SPI_CSR_DLYBS(0)		//delay after cs before sck
 						 | SPI_CSR_DLYBCT(0);	
-						 
+	
+	//CPHA = 1 (NCPHA = 0)
+	spi_ptr->SPI_CSR[0] &= ~SPI_CSR_NCPHA;
+					 
 	//clear CSAAT (programmable clock source)
 	spi_ptr->SPI_CSR[0] &= ~SPI_CSR_CSAAT;
 	
+	//enable PIO interrupt for data ready interrupt in NVIC
+// 	NVIC_DisableIRQ(WKUP15_IRQn);
+// 	NVIC_ClearPendingIRQ(WKUP15_IRQn);
+// 	NVIC_SetPriority(WKUP15_IRQn, 1);
+// 	NVIC_EnableIRQ(WKUP15_IRQn);
+
+	//next transfer is last
+//	spi_ptr->SPI_CR = SPI_CR_LASTXFER;
+	
+	while(spi_init_begin == 0){}
+		
 	//enable SPI
-	spi_ptr->SPI_CR = SPI_CR_SPIEN;	
+	spi_ptr->SPI_CR = SPI_CR_SPIEN;
 	
 	//sample write operation
 	//spi_ptr->SPI_TDR = SPI_TDR_PCS(1) | SPI_TDR_TD(data)
 	//				   | SPI_TDR_LASTXFER;
 	
-	//while (spi_init_timer_begin != 1){}
-		
+
+	
 	adxl_init();
 }
 
 void adxl_init(void){
 	
-	//write to tdx (two MSB bits in write mode should be 0 & 0)
-	//0x310B 13-bit mode, +-16g
-	spi_ptr->SPI_TDR = SPI_TDR_TD(0x310B) | SPI_TDR_LASTXFER; 
+	int data = 0;
 	
-	//wait until transaction is complete
-//	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
+	//make sure connection is solid by doing test read
+	//address 0x00 should contain 0xE5
+	//0x1000 (R = 1, MB = 0, address = 0x00)
+//	while((spi_ptr->SPI_SR & SPI_SR_TDRE)){}
 		
-	//0x2D08 Start Measurement
-	spi_ptr->SPI_TDR = SPI_TDR_TD(0x2D08) | SPI_TDR_LASTXFER;
+	spi_ptr->SPI_TDR = SPI_TDR_TD(0x1000);
 	
-	//wait until transaction is complete
-//	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
+	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
 	
-	//0x2E80 Enable data_ready interrupt
-	spi_ptr->SPI_TDR = SPI_TDR_TD(0x2E80) | SPI_TDR_LASTXFER;
+	data = spi_ptr->SPI_RDR;
+	
+	if(data == 0xE5){
+		//set LED pin PA6 as low (LED is active low)
+		pioa_ptr->PIO_CODR = PIO_PA6;
+	}
+// 	
+// 		
+// 	//write to tdx (two MSB bits in write mode should be 0 & 0)
+// 	//0x310B 13-bit mode, +-16g
+// 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x310B); 
+// 	
+// 	//wait until transaction is complete
+// 	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
+// 		
+// 	//wait until transaction is complete
+// 	while(!(spi_ptr->SPI_SR & SPI_SR_RDRF)){}
+// 	
+// 	//read data register to clear flag
+// 	data = spi_ptr->SPI_RDR;
+// 		
+// 	//0x2D08 Start Measurement
+// 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x2D08);
+// 	
+// 	//wait until transaction is complete
+// 	while(!(spi_ptr->SPI_SR & SPI_SR_RDRF)){}
+// 	
+// 	//read data register to clear flag
+// 	data = spi_ptr->SPI_RDR;
+// 		
+// 	//0x2E80 Enable data_ready interrupt
+// 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x2E80);
+// 	
+// 	//wait until transaction is complete
+// 	while(!(spi_ptr->SPI_SR & SPI_SR_RDRF)){}
+// 
+// 	//read data register to clear flag
+// 	data = spi_ptr->SPI_RDR;
 }
 
 int voltage_to_adc(float voltage){
