@@ -20,6 +20,7 @@ int emg_voltage = 0;
 int ecg_voltage = 0;
 int spi_init_timer = 0;
 volatile int spi_init_begin = 0;
+volatile int adxl_data_ready = 0;
 
 //function prototypes
 void enable_pio_clk(void);
@@ -27,13 +28,16 @@ void enable_tc_clk(void);
 void enable_adc_clk(void);
 void enable_i2c_clk(void);
 void enable_spi_clk(void);
-void pio_init(void);
-void tc_init(void);
-void adc_init(void);
-void i2c_init(void);
-void spi_init(void);
-void adxl_init(void);
-int voltage_to_adc(float voltage);
+void init_pio(void);
+void init_tc(void);
+void init_adc(void);
+void init_i2c(void);
+void init_spi(void);
+void init_adxl(void);
+void write_adxl(uint32_t address, uint32_t data);
+void read_adxl(void);
+uint32_t voltage_to_adc(float voltage);
+
 
 void TC0_Handler(void){
 	
@@ -77,10 +81,13 @@ void TC0_Handler(void){
 void PIOB_Handler(void){
 
 	//set LED pin PA6 as low (LED is active low)
-//	pioa_ptr->PIO_CODR = PIO_PA6;
-		
+	pioa_ptr->PIO_CODR = PIO_PA6;
+	
+	//Set ADXL data ready flag	
+	adxl_data_ready = 1;
+	
 	//clear flag
-//	piob_ptr->PIO_ISR;
+	piob_ptr->PIO_ISR;
 }
 
 //main function
@@ -91,10 +98,10 @@ int main (void)
 	//can be switched by redefining "CONFIG_SYSCLK_SOURCE"
 	//see conf_clock.h for possible clock sources
 	sysclk_init();
-	pio_init();
-	tc_init();
-	adc_init();
-	spi_init();
+	init_pio();
+	init_tc();
+	init_adc();
+	init_spi();
 	
 	//empty while loop to run SAMG55 indefinitely
 	while (1) {}
@@ -148,7 +155,7 @@ void enable_spi_clk(void){
 	while(!(PMC->PMC_SR & PMC_SR_PCKRDY6)){}
 }
 
-void pio_init(void){
+void init_pio(void){
 
 	enable_pio_clk();
 	
@@ -168,7 +175,7 @@ void pio_init(void){
 	pioa_ptr->PIO_PER |= PIO_PA2;
 }
 
-void tc_init(void){
+void init_tc(void){
 		
 	//set peripheral function for tc (B function) on pin PA0
 	pioa_ptr->PIO_ABCDSR[0] |= PIO_ABCDSR_P0;
@@ -220,7 +227,7 @@ void tc_init(void){
 	NVIC_EnableIRQ(TC0_IRQn);
 }
 
-void adc_init(void){
+void init_adc(void){
 	
 	//set prescaler for ADC clk (max), track time (max)
 	//set MR Transfer to 2 (default)
@@ -241,16 +248,17 @@ void adc_init(void){
 	enable_adc_clk();	
 }
 
-void i2c_init(void){
+void init_i2c(void){
 	
 }
 
-void spi_init(void){
+void init_spi(void){
 	
 	//disable SPI to configure
 	spi_ptr->SPI_CR = SPI_CR_SPIDIS;
 	
-	enable_spi_clk();
+	//reset SPI
+	spi_ptr->SPI_CR = SPI_CR_SWRST;
 	
 	//set peripheral function A for SPI on pin PA09 (MISO/SDO)
 	pioa_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P9;
@@ -272,7 +280,7 @@ void spi_init(void){
 	piob_ptr->PIO_PER |= PIO_PB9;
 	
 	//disable output
-//	piob_ptr->PIO_ODR |= PIO_PB9;
+	piob_ptr->PIO_ODR |= PIO_PB9;
 	
 	//enable interrupt on PB09
 	piob_ptr->PIO_IER |= PIO_PB9;
@@ -301,7 +309,7 @@ void spi_init(void){
 
 	//set as master, use peripheral clock, mode fault disable
 	spi_ptr->SPI_MR = SPI_MR_MSTR | SPI_MR_BRSRCCLK_PMC_PCK
-					  | SPI_MR_PCS(1) | SPI_MR_MODFDIS;
+					  | SPI_MR_PCS(0) | SPI_MR_MODFDIS;
 					  
 	//set to fixed peripheral mode
 	spi_ptr->SPI_MR &= ~SPI_MR_PS;			
@@ -316,7 +324,7 @@ void spi_init(void){
 	spi_ptr->SPI_CSR[0] = SPI_CSR_CPOL		//CPOL = 1
 				         | SPI_CSR_BITS_16_BIT	//16-bit transfers
 						 | SPI_CSR_SCBR(2)		//bit rate 1/2 pclk
-						 | SPI_CSR_DLYBS(0)		//delay after cs before sck
+						 | SPI_CSR_DLYBS(4)		//delay after cs before sck
 						 | SPI_CSR_DLYBCT(0);	
 	
 	//CPHA = 1 (NCPHA = 0)
@@ -326,82 +334,162 @@ void spi_init(void){
 	spi_ptr->SPI_CSR[0] &= ~SPI_CSR_CSAAT;
 	
 	//enable PIO interrupt for data ready interrupt in NVIC
-// 	NVIC_DisableIRQ(WKUP15_IRQn);
-// 	NVIC_ClearPendingIRQ(WKUP15_IRQn);
-// 	NVIC_SetPriority(WKUP15_IRQn, 1);
-// 	NVIC_EnableIRQ(WKUP15_IRQn);
+	NVIC_DisableIRQ(PIOB_IRQn);
+	NVIC_ClearPendingIRQ(PIOB_IRQn);
+	NVIC_SetPriority(PIOB_IRQn, 1);
+	NVIC_EnableIRQ(PIOB_IRQn);
 
 	//next transfer is last
-//	spi_ptr->SPI_CR = SPI_CR_LASTXFER;
+	spi_ptr->SPI_CR = SPI_CR_LASTXFER;
 	
 	while(spi_init_begin == 0){}
-		
+
+	enable_spi_clk();	
+	
 	//enable SPI
 	spi_ptr->SPI_CR = SPI_CR_SPIEN;
 	
-	//sample write operation
-	//spi_ptr->SPI_TDR = SPI_TDR_PCS(1) | SPI_TDR_TD(data)
-	//				   | SPI_TDR_LASTXFER;
-	
-
-	
-	adxl_init();
+	init_adxl();
 }
 
-void adxl_init(void){
+void init_adxl(void){
 	
-	int data = 0;
+	uint32_t dontcare = 0;
+	uint32_t adxlData0 = 0;
+	uint32_t adxlData1 = 0;
+	uint32_t adxlData2 = 0;
+	uint32_t adxlData3 = 0;
+	uint32_t xAxis = 0;
+	uint32_t yAxis = 0;
+	uint32_t zAxis = 0;
 	
-	//make sure connection is solid by doing test read
+	//check SPI connection is solid by doing test read
 	//address 0x00 should contain 0xE5
-	//0x1000 (R = 1, MB = 0, address = 0x00)
-//	while((spi_ptr->SPI_SR & SPI_SR_TDRE)){}
+	//0x8000 (R = 1, MB = 0, address = 0x00)
 		
-	spi_ptr->SPI_TDR = SPI_TDR_TD(0x1000);
+// 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x8000);
+// 	
+// 	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+// 	
+// 	//discard don't cares, keep 8 bits of data
+// 	data = (spi_ptr->SPI_RDR & 0xFF);
+// 	
+// 	//device ID should read 0xE5
+// 	if(data == 0xE5){
+// 		//set LED pin PA6 as low (LED is active low)
+// 		pioa_ptr->PIO_CODR = PIO_PA6;
+// 	}
+
+	//write to ADXL (two MSB bits in write mode should be 0 & 0)
+	//0x310B 13-bit mode, +-16g
+	write_adxl(0x31, 0x0B);
 	
+	//0x2D08 Start Measurement
+	write_adxl(0x2D, 0x08);
+	
+	//0x2F7F Enable data_ready interrupt on INT1 pin
+	write_adxl(0x2F, 0x7F);
+	
+	//0x2E80 Enable data_ready interrupt
+	write_adxl(0x2E, 0x80);
+	
+	while(adxl_data_ready == 0){}
+		
+	/* START SPI READ TRANSFER*/
+	
+	//write to start data transfer
+	spi_ptr->SPI_TDR = SPI_TDR_TD(0xF200);
+		
+	//wait for data to load into shift register
+	while(!(spi_ptr->SPI_SR & SPI_SR_TDRE)){}
+		
+	//start loading next data
+	spi_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+	
+	//check if read is ready
 	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
 	
-	data = spi_ptr->SPI_RDR;
+	//save data
+	adxlData0 = spi_ptr->SPI_RDR;
 	
-	if(data == 0xE5){
-		//set LED pin PA6 as low (LED is active low)
-		pioa_ptr->PIO_CODR = PIO_PA6;
+	//wait for data to load into shift register
+	while(!(spi_ptr->SPI_SR & SPI_SR_TDRE)){}
+
+	//start loading next data
+	spi_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+	
+	//check if read is ready
+	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	
+	//save data
+	adxlData1 = spi_ptr->SPI_RDR;
+	
+	//wait for data to load into shift register
+	while(!(spi_ptr->SPI_SR & SPI_SR_TDRE)){}
+
+	//start loading next data
+	spi_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+	
+	//check if read is ready
+	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	
+	//save data
+	adxlData2 = spi_ptr->SPI_RDR;
+	
+	//check if read is ready
+	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	
+	//save data
+	adxlData3 = spi_ptr->SPI_RDR;
+		
+	//merge data to correspond to correct axis (Page 4 ADXL, quick start)
+	xAxis = (adxlData1 & 0xFF00) | (adxlData0 & 0xFF);
+	yAxis = (adxlData2 & 0xFF00) | (adxlData1 & 0xFF);
+	zAxis = (adxlData3 & 0xFF00) | (adxlData2 & 0xFF);
+	
+	if (xAxis == 100){
+		
+		pioa_ptr->PIO_SODR = PIO_PA6;
 	}
-// 	
-// 		
-// 	//write to tdx (two MSB bits in write mode should be 0 & 0)
-// 	//0x310B 13-bit mode, +-16g
-// 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x310B); 
-// 	
-// 	//wait until transaction is complete
-// 	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
-// 		
-// 	//wait until transaction is complete
-// 	while(!(spi_ptr->SPI_SR & SPI_SR_RDRF)){}
-// 	
-// 	//read data register to clear flag
-// 	data = spi_ptr->SPI_RDR;
-// 		
-// 	//0x2D08 Start Measurement
-// 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x2D08);
-// 	
-// 	//wait until transaction is complete
-// 	while(!(spi_ptr->SPI_SR & SPI_SR_RDRF)){}
-// 	
-// 	//read data register to clear flag
-// 	data = spi_ptr->SPI_RDR;
-// 		
-// 	//0x2E80 Enable data_ready interrupt
-// 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x2E80);
-// 	
-// 	//wait until transaction is complete
-// 	while(!(spi_ptr->SPI_SR & SPI_SR_RDRF)){}
-// 
-// 	//read data register to clear flag
-// 	data = spi_ptr->SPI_RDR;
+	
+	if(yAxis == 100){
+		pioa_ptr->PIO_SODR = PIO_PA6;
+	}
+	
+	if(zAxis == 100){
+		
+		pioa_ptr->PIO_SODR = PIO_PA6;	
+	}
 }
 
-int voltage_to_adc(float voltage){
+void write_adxl(uint32_t address, uint32_t data){
+	
+	//combine data and address
+	data |= (address << 8);
+	
+	//write to transfer data register
+	spi_ptr->SPI_TDR = SPI_TDR_TD(data);
+		
+	//wait for transaction to end
+	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+		
+	//read data register to clear flag
+	data = spi_ptr->SPI_RDR;
+}
+
+void read_adxl(void){
+	
+	//write to start data transfer
+	spi_ptr->SPI_TDR = SPI_TDR_TD(0xF200);
+	
+	//wait for data to load into shift register
+	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
+		
+	//start loading next data
+	spi_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+}
+
+uint32_t voltage_to_adc(float voltage){
 	
 	//assuming 3.3v is max. value
 	//0v is min. value for adc
