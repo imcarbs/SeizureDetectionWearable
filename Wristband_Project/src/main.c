@@ -7,12 +7,12 @@
 #include <asf.h>
 
 //Global structs for accessing registers
-Pio *pioa_ptr = PIOA;
-Pio *piob_ptr = PIOB;
-Tc *tc_ptr = TC0;
+Pio *pioA_ptr = PIOA;
+Pio *pioB_ptr = PIOB;
+Tc *tc0_ptr = TC0;
 Adc *adc_ptr = ADC;
-Spi *spi_ptr = SPI0;
-Flexcom *fc_ptr = FLEXCOM0;
+Spi *spi0_ptr = SPI0;
+Flexcom *fc0_ptr = FLEXCOM0;
 
 //Global variables
 int eda_voltage = 0;
@@ -27,22 +27,23 @@ void enable_pio_clk(void);
 void enable_tc_clk(void);
 void enable_adc_clk(void);
 void enable_i2c_clk(void);
-void enable_spi_clk(void);
+void enable_spi0_clk(void);
 void init_pio(void);
 void init_tc(void);
 void init_adc(void);
 void init_i2c(void);
-void init_spi(void);
+void init_adxl_spi0(void);
 void init_adxl(void);
 void write_adxl(uint32_t address, uint32_t data);
-void read_adxl(void);
+void verify_adxl_spi0(void);
+uint32_t update_accel_data(int32_t * xAxis, int32_t * yAxis, int32_t * zAxis);
 uint32_t voltage_to_adc(float voltage);
 
 
 void TC0_Handler(void){
 	
 //check if button is pressed
-//if(pioa_ptr->PIO_PDSR & PIO_PA2)	
+//if(pioA_ptr->PIO_PDSR & PIO_PA2)	
 	
 	//get adc channels 0 & 1 current reading
 	adc_ptr->ADC_CR = ADC_CR_START;
@@ -53,14 +54,14 @@ void TC0_Handler(void){
 	//if ADC reads more than threshold, turn on buzzer
 	if( (eda_voltage > voltage_to_adc(2.821)) || (emg_voltage > voltage_to_adc(0.101)) ){
 			
-		tc_ptr->TC_CHANNEL[0].TC_RB = 7500; // 50% duty cycle for TIOB (max buzzer volume)
+		tc0_ptr->TC_CHANNEL[0].TC_RB = 7500; // 50% duty cycle for TIOB (max buzzer volume)
 		eda_voltage = 0;
 		emg_voltage = 0;
 		//edc_voltage = 0;
 	}
 	
 	else{
-		tc_ptr->TC_CHANNEL[0].TC_RB = 0x0000; //0% duty cycle for TIOB (buzzer off)
+		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x0000; //0% duty cycle for TIOB (buzzer off)
 		eda_voltage = 0;
 		emg_voltage = 0;
 		//edc_voltage = 0;
@@ -75,19 +76,20 @@ void TC0_Handler(void){
 	}
 	
 	//clear TC0 interrupt flags
-	tc_ptr->TC_CHANNEL[0].TC_SR;
+	tc0_ptr->TC_CHANNEL[0].TC_SR;
 }
 
 void PIOB_Handler(void){
 
-	//set LED pin PA6 as low (LED is active low)
-	pioa_ptr->PIO_CODR = PIO_PA6;
+	//check if interrupt sent from right pin
+	if(pioB_ptr->PIO_ISR & PIO_ISR_P9){
+		
+		//Set ADXL data ready flag	
+		adxl_data_ready = 1;
+	}
 	
-	//Set ADXL data ready flag	
-	adxl_data_ready = 1;
-	
-	//clear flag
-	piob_ptr->PIO_ISR;
+	//clear ISR flag
+	pioB_ptr->PIO_ISR;
 }
 
 //main function
@@ -101,7 +103,8 @@ int main (void)
 	init_pio();
 	init_tc();
 	init_adc();
-	init_spi();
+	init_adxl_spi0();
+	init_adxl();
 	
 	//empty while loop to run SAMG55 indefinitely
 	while (1) {}
@@ -134,7 +137,7 @@ void enable_i2c_clk(void){
 	PMC->PMC_PCER0 |= PMC_PCER0_PID8;
 }
 
-void enable_spi_clk(void){
+void enable_spi0_clk(void){
 	
 	/* SPI will use main clock as source
 	b/c it is limited to 5 Mhz maximum */
@@ -145,8 +148,8 @@ void enable_spi_clk(void){
 	//disable PCK6 (for FLEXCOM0) to configure
 	PMC->PMC_SCDR = PMC_SCDR_PCK6;
 	
-	//set main clock as source for PCK0 (8Mhz) scale to 8Mhz/32
-	PMC->PMC_PCK[PMC_PCK_6] = PMC_PCK_CSS_MAIN_CLK | PMC_PCK_PRES_CLK_16;
+	//set main clock as source for PCK0 (8Mhz) scale to 8Mhz/8
+	PMC->PMC_PCK[PMC_PCK_6] = PMC_PCK_CSS_MAIN_CLK | PMC_PCK_PRES_CLK_8;
 	
 	//enable PCK6
 	PMC->PMC_SCER = PMC_SCER_PCK6;
@@ -160,45 +163,45 @@ void init_pio(void){
 	enable_pio_clk();
 	
 	//enable pin PA6 as output (LED)
-	pioa_ptr->PIO_OER |= PIO_PA6;
+	pioA_ptr->PIO_OER |= PIO_PA6;
 	
 	//set LED pin PA6 as low (LED is active low)
-//	pioa_ptr->PIO_CODR = PIO_PA6;
+//	pioA_ptr->PIO_CODR = PIO_PA6;
 
 	//set LED pin PA6 as high (LED is active low)
-	pioa_ptr->PIO_SODR |= PIO_PA6;
+	pioA_ptr->PIO_SODR |= PIO_PA6;
 	
 	//enable switch (pull up resistor) [PA2]
-	pioa_ptr->PIO_PUER |= PIO_PA2;
+	pioA_ptr->PIO_PUER |= PIO_PA2;
 	
 	//enable switch pin control by PIO [PA2]
-	pioa_ptr->PIO_PER |= PIO_PA2;
+	pioA_ptr->PIO_PER |= PIO_PA2;
 }
 
 void init_tc(void){
 		
 	//set peripheral function for tc (B function) on pin PA0
-	pioa_ptr->PIO_ABCDSR[0] |= PIO_ABCDSR_P0;
-	pioa_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P0;
+	pioA_ptr->PIO_ABCDSR[0] |= PIO_ABCDSR_P0;
+	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P0;
 	
 	//set peripheral function for tc (B function) on pin PA1
-	pioa_ptr->PIO_ABCDSR[0] |= PIO_ABCDSR_P1;
-	pioa_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P1;
+	pioA_ptr->PIO_ABCDSR[0] |= PIO_ABCDSR_P1;
+	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P1;
 	
 	//disable PIO control of PA0 & PA1 so TC can control pins
-	pioa_ptr->PIO_PDR |= PIO_PA0;
-	pioa_ptr->PIO_PDR |= PIO_PA1;
+	pioA_ptr->PIO_PDR |= PIO_PA0;
+	pioA_ptr->PIO_PDR |= PIO_PA1;
 	
 	//enable pmc periph clock for tc
 	enable_tc_clk();
 	
 	/*TC0 Setup*/
 	//temporarily disable TC clk input
-	tc_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKDIS;
+	tc0_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKDIS;
 		
 	//set wave mode and to reset on RC match
 	//also set muxed pin to toggle on RA & RC match (scope debugging)
-	tc_ptr->TC_CHANNEL[0].TC_CMR = 
+	tc0_ptr->TC_CHANNEL[0].TC_CMR = 
 		TC_CMR_WAVE						//set TC for wave mode
 		| TC_CMR_WAVSEL_UP_RC			//count up to RC value
 		| TC_CMR_TCCLKS_TIMER_CLOCK1	// = 120Mhz (Master Clock) * (1/2)
@@ -209,15 +212,15 @@ void init_tc(void){
 		| TC_CMR_BCPC_CLEAR;			//clear PA1 on RC match
 	
 	//set period & duty cycle (RC value = (120Mhz * prescaler)/(goal frequency))
-	tc_ptr->TC_CHANNEL[0].TC_RA = 7500; //duty cycle for TIOA
-	tc_ptr->TC_CHANNEL[0].TC_RB = 7500; //duty cycle for TIOB
-	tc_ptr->TC_CHANNEL[0].TC_RC = 15000; //period (for TIOA & TIOB)
+	tc0_ptr->TC_CHANNEL[0].TC_RA = 7500; //duty cycle for TIOA
+	tc0_ptr->TC_CHANNEL[0].TC_RB = 7500; //duty cycle for TIOB
+	tc0_ptr->TC_CHANNEL[0].TC_RC = 15000; //period (for TIOA & TIOB)
 	
 	//enable interrupt on RC compare match
-	tc_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
+	tc0_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
 	
 	//enable tc clock & start tc
-	tc_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;	
+	tc0_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;	
 	/*End TC0 Setup*/	
 	
 	//Enable TC0 Interrupt in NVIC
@@ -252,109 +255,104 @@ void init_i2c(void){
 	
 }
 
-void init_spi(void){
+void init_adxl_spi0(void){
 	
 	//disable SPI to configure
-	spi_ptr->SPI_CR = SPI_CR_SPIDIS;
+	spi0_ptr->SPI_CR = SPI_CR_SPIDIS;
 	
 	//reset SPI
-	spi_ptr->SPI_CR = SPI_CR_SWRST;
+	spi0_ptr->SPI_CR = SPI_CR_SWRST;
 	
 	//set peripheral function A for SPI on pin PA09 (MISO/SDO)
-	pioa_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P9;
-	pioa_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P9;
+	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P9;
+	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P9;
 
 	//set peripheral function A for SPI on pin PA10 (MOSI/SDA)
-	pioa_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P10;
-	pioa_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P10;
+	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P10;
+	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P10;
 	
 	//set peripheral function A for SPI on pin PB00 (SPCK/SCL)
-	piob_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P0;
-	piob_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P0;
+	pioB_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P0;
+	pioB_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P0;
 		
  	//set peripheral function A for SPI on pin PA25 (NPCS0/NSS/CS)
- 	pioa_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P25;
- 	pioa_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P25;
+ 	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P25;
+ 	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P25;
 	 
 	//enable PIO control of PB09 for use as input for INT1
-	piob_ptr->PIO_PER |= PIO_PB9;
+	pioB_ptr->PIO_PER |= PIO_PB9;
 	
 	//disable output
-	piob_ptr->PIO_ODR |= PIO_PB9;
+	pioB_ptr->PIO_ODR |= PIO_PB9;
 	
 	//enable interrupt on PB09
-	piob_ptr->PIO_IER |= PIO_PB9;
+	pioB_ptr->PIO_IER |= PIO_PB9;
 	
 	//enable additional interrupt settings for PB09
-	piob_ptr->PIO_AIMER |= PIO_PB9;
+	pioB_ptr->PIO_AIMER |= PIO_PB9;
 	
 	//enable edge detection for PB09
-	piob_ptr->PIO_ESR |= PIO_PB9;
+	pioB_ptr->PIO_ESR |= PIO_PB9;
 	
 	//set to detect rising edge for PB09 (INT1)
-	piob_ptr->PIO_REHLSR |= PIO_PB9;
+	pioB_ptr->PIO_REHLSR |= PIO_PB9;
 	
 	//disable PIO control of PA09, PB00, PA25, & PA10
 	//so SPI0 can control pins
-	pioa_ptr->PIO_PDR |= PIO_PA9;
-	piob_ptr->PIO_PDR |= PIO_PB0;
-	pioa_ptr->PIO_PDR |= PIO_PA10;
-	pioa_ptr->PIO_PDR |= PIO_PA25;
+	pioA_ptr->PIO_PDR |= PIO_PA9;
+	pioB_ptr->PIO_PDR |= PIO_PB0;
+	pioA_ptr->PIO_PDR |= PIO_PA10;
+	pioA_ptr->PIO_PDR |= PIO_PA25;
 	
 	//set flexcom mode to SPI
-	fc_ptr->FLEXCOM_MR = FLEXCOM_MR_OPMODE_SPI;	
+	fc0_ptr->FLEXCOM_MR = FLEXCOM_MR_OPMODE_SPI;	
 	
-	//flexcom txdata register to hold SPI data (image)
-	//fc_ptr->FLEXCOM_THR;
-
 	//set as master, use peripheral clock, mode fault disable
-	spi_ptr->SPI_MR = SPI_MR_MSTR | SPI_MR_BRSRCCLK_PMC_PCK
+	spi0_ptr->SPI_MR = SPI_MR_MSTR | SPI_MR_BRSRCCLK_PMC_PCK
 					  | SPI_MR_PCS(0) | SPI_MR_MODFDIS;
 					  
 	//set to fixed peripheral mode
-	spi_ptr->SPI_MR &= ~SPI_MR_PS;			
+	spi0_ptr->SPI_MR &= ~SPI_MR_PS;			
 
 	//set to direct connection to peripheral				  
-	spi_ptr->SPI_MR &= ~SPI_MR_PCSDEC;
+	spi0_ptr->SPI_MR &= ~SPI_MR_PCSDEC;
 
 	//local loopback disabled
-	spi_ptr->SPI_MR &= ~SPI_MR_LLB;
+	spi0_ptr->SPI_MR &= ~SPI_MR_LLB;
 	
 	//chip select settings
-	spi_ptr->SPI_CSR[0] = SPI_CSR_CPOL		//CPOL = 1
+	spi0_ptr->SPI_CSR[0] = SPI_CSR_CPOL			//CPOL = 1
 				         | SPI_CSR_BITS_16_BIT	//16-bit transfers
 						 | SPI_CSR_SCBR(2)		//bit rate 1/2 pclk
 						 | SPI_CSR_DLYBS(4)		//delay after cs before sck
-						 | SPI_CSR_DLYBCT(0);	
+						 | SPI_CSR_DLYBCT(0);	//0 delay btwn multibyte transfers
 	
 	//CPHA = 1 (NCPHA = 0)
-	spi_ptr->SPI_CSR[0] &= ~SPI_CSR_NCPHA;
+	spi0_ptr->SPI_CSR[0] &= ~SPI_CSR_NCPHA;
 					 
 	//clear CSAAT (programmable clock source)
-	spi_ptr->SPI_CSR[0] &= ~SPI_CSR_CSAAT;
+	spi0_ptr->SPI_CSR[0] &= ~SPI_CSR_CSAAT;
 	
-	//enable PIO interrupt for data ready interrupt in NVIC
+	//enable PIOB interrupt for data ready interrupt in NVIC
 	NVIC_DisableIRQ(PIOB_IRQn);
 	NVIC_ClearPendingIRQ(PIOB_IRQn);
 	NVIC_SetPriority(PIOB_IRQn, 1);
 	NVIC_EnableIRQ(PIOB_IRQn);
 
 	//next transfer is last
-	spi_ptr->SPI_CR = SPI_CR_LASTXFER;
+	spi0_ptr->SPI_CR = SPI_CR_LASTXFER;
 	
+	//wait for adxl to power up
 	while(spi_init_begin == 0){}
 
-	enable_spi_clk();	
+	enable_spi0_clk();	
 	
 	//enable SPI
-	spi_ptr->SPI_CR = SPI_CR_SPIEN;
-	
-	init_adxl();
+	spi0_ptr->SPI_CR = SPI_CR_SPIEN;
 }
 
 void init_adxl(void){
 	
-	uint32_t dontcare = 0;
 	uint32_t adxlData0 = 0;
 	uint32_t adxlData1 = 0;
 	uint32_t adxlData2 = 0;
@@ -362,23 +360,8 @@ void init_adxl(void){
 	uint32_t xAxis = 0;
 	uint32_t yAxis = 0;
 	uint32_t zAxis = 0;
-	
-	//check SPI connection is solid by doing test read
-	//address 0x00 should contain 0xE5
-	//0x8000 (R = 1, MB = 0, address = 0x00)
-		
-// 	spi_ptr->SPI_TDR = SPI_TDR_TD(0x8000);
-// 	
-// 	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
-// 	
-// 	//discard don't cares, keep 8 bits of data
-// 	data = (spi_ptr->SPI_RDR & 0xFF);
-// 	
-// 	//device ID should read 0xE5
-// 	if(data == 0xE5){
-// 		//set LED pin PA6 as low (LED is active low)
-// 		pioa_ptr->PIO_CODR = PIO_PA6;
-// 	}
+
+//	verify_adxl_spi0();
 
 	//write to ADXL (two MSB bits in write mode should be 0 & 0)
 	//0x310B 13-bit mode, +-16g
@@ -393,73 +376,63 @@ void init_adxl(void){
 	//0x2E80 Enable data_ready interrupt
 	write_adxl(0x2E, 0x80);
 	
+	//wait for adxl data to be ready
 	while(adxl_data_ready == 0){}
 		
 	/* START SPI READ TRANSFER*/
 	
 	//write to start data transfer
-	spi_ptr->SPI_TDR = SPI_TDR_TD(0xF200);
+	spi0_ptr->SPI_TDR = SPI_TDR_TD(0xF200);
 		
 	//wait for data to load into shift register
-	while(!(spi_ptr->SPI_SR & SPI_SR_TDRE)){}
+	while(!(spi0_ptr->SPI_SR & SPI_SR_TDRE)){}
 		
 	//start loading next data
-	spi_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+	spi0_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
 	
 	//check if read is ready
-	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	while((spi0_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
 	
 	//save data
-	adxlData0 = spi_ptr->SPI_RDR;
+	adxlData0 = spi0_ptr->SPI_RDR;
+	
+	//clear ready flag
+	adxl_data_ready = 0;
 	
 	//wait for data to load into shift register
-	while(!(spi_ptr->SPI_SR & SPI_SR_TDRE)){}
+	while(!(spi0_ptr->SPI_SR & SPI_SR_TDRE)){}
 
 	//start loading next data
-	spi_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+	spi0_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
 	
 	//check if read is ready
-	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	while((spi0_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
 	
 	//save data
-	adxlData1 = spi_ptr->SPI_RDR;
+	adxlData1 = spi0_ptr->SPI_RDR;
 	
 	//wait for data to load into shift register
-	while(!(spi_ptr->SPI_SR & SPI_SR_TDRE)){}
+	while(!(spi0_ptr->SPI_SR & SPI_SR_TDRE)){}
 
 	//start loading next data
-	spi_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+	spi0_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
 	
 	//check if read is ready
-	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	while((spi0_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
 	
 	//save data
-	adxlData2 = spi_ptr->SPI_RDR;
+	adxlData2 = spi0_ptr->SPI_RDR;
 	
 	//check if read is ready
-	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	while((spi0_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
 	
 	//save data
-	adxlData3 = spi_ptr->SPI_RDR;
+	adxlData3 = spi0_ptr->SPI_RDR;
 		
 	//merge data to correspond to correct axis (Page 4 ADXL, quick start)
 	xAxis = (adxlData1 & 0xFF00) | (adxlData0 & 0xFF);
 	yAxis = (adxlData2 & 0xFF00) | (adxlData1 & 0xFF);
 	zAxis = (adxlData3 & 0xFF00) | (adxlData2 & 0xFF);
-	
-	if (xAxis == 100){
-		
-		pioa_ptr->PIO_SODR = PIO_PA6;
-	}
-	
-	if(yAxis == 100){
-		pioa_ptr->PIO_SODR = PIO_PA6;
-	}
-	
-	if(zAxis == 100){
-		
-		pioa_ptr->PIO_SODR = PIO_PA6;	
-	}
 }
 
 void write_adxl(uint32_t address, uint32_t data){
@@ -468,25 +441,105 @@ void write_adxl(uint32_t address, uint32_t data){
 	data |= (address << 8);
 	
 	//write to transfer data register
-	spi_ptr->SPI_TDR = SPI_TDR_TD(data);
+	spi0_ptr->SPI_TDR = SPI_TDR_TD(data);
 		
 	//wait for transaction to end
-	while((spi_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	while((spi0_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
 		
 	//read data register to clear flag
-	data = spi_ptr->SPI_RDR;
+	data = spi0_ptr->SPI_RDR;
 }
 
-void read_adxl(void){
+uint32_t update_accel_data(uint32_t * xAxis, uint32_t * yAxis, uint32_t * zAxis){
+	
+	uint32_t adxlData0 = 0;
+	uint32_t adxlData1 = 0;
+	uint32_t adxlData2 = 0;
+	uint32_t adxlData3 = 0;
+	
+	//check if data is ready to be read
+	if(adxl_data_ready == 0){
+		return -1;	
+	}
 	
 	//write to start data transfer
-	spi_ptr->SPI_TDR = SPI_TDR_TD(0xF200);
+	spi0_ptr->SPI_TDR = SPI_TDR_TD(0xF200);
 	
 	//wait for data to load into shift register
-	while(spi_ptr->SPI_SR & SPI_SR_TDRE){}
-		
+	while(!(spi0_ptr->SPI_SR & SPI_SR_TDRE)){}
+	
 	//start loading next data
-	spi_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+	spi0_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+	
+	//check if read is ready
+	while((spi0_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	
+	//save data
+	adxlData0 = spi0_ptr->SPI_RDR;
+	
+	//clear data ready flag
+	adxl_data_ready = 0;
+	
+	//wait for data to load into shift register
+	while(!(spi0_ptr->SPI_SR & SPI_SR_TDRE)){}
+
+	//start loading next data
+	spi0_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+	
+	//check if read is ready
+	while((spi0_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	
+	//save data
+	adxlData1 = spi0_ptr->SPI_RDR;
+	
+	//wait for data to load into shift register
+	while(!(spi0_ptr->SPI_SR & SPI_SR_TDRE)){}
+
+	//start loading next data
+	spi0_ptr->SPI_TDR = SPI_TDR_TD(0xFFFF);
+	
+	//check if read is ready
+	while((spi0_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	
+	//save data
+	adxlData2 = spi0_ptr->SPI_RDR;
+	
+	//check if read is ready
+	while((spi0_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	
+	//save data
+	adxlData3 = spi0_ptr->SPI_RDR;
+	
+	//merge data to correspond to correct axis (Page 4 ADXL, quick start)
+	*xAxis = (adxlData1 & 0xFF00) | (adxlData0 & 0xFF);
+	*yAxis = (adxlData2 & 0xFF00) | (adxlData1 & 0xFF);
+	*zAxis = (adxlData3 & 0xFF00) | (adxlData2 & 0xFF);
+	
+	return 1;
+}
+
+void verify_adxl_spi0(void){	
+	
+	uint32_t deviceID = 0;
+	
+	//check SPI connection is solid by doing test read
+	//address 0x00 should contain 0xE5
+	//0x8000 (R = 1, MB = 0, address = 0x00)
+	spi0_ptr->SPI_TDR = SPI_TDR_TD(0x8000);
+	
+	//wait for slave data to be moved to read register
+	while((spi0_ptr->SPI_SR & SPI_SR_RDRF) == 0){}
+	
+	//discard don't cares, keep 8 bits of data
+	deviceID = (spi0_ptr->SPI_RDR & 0xFF);
+	
+	//device ID should read 0xE5
+	//if it does, turn on LED
+	if(deviceID == 0xE5){
+		
+		//set LED pin PA6 as low (LED is active low)
+		pioA_ptr->PIO_CODR = PIO_PA6;
+	}
 }
 
 uint32_t voltage_to_adc(float voltage){
