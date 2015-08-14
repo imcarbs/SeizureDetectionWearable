@@ -38,17 +38,19 @@ void init_adc(void);
 void init_i2c(void);
 void init_adxl_spi0(void);
 void init_adxl(void);
+void verify_adxl_spi0(void);
 void write_adxl(uint32_t address, uint32_t data);
 int32_t read_adxl(uint32_t address, uint32_t data);
-void verify_adxl_spi0(void);
 int32_t update_accel_data(void);
 uint32_t voltage_to_adc(float voltage);
 
-
 void TC0_Handler(void){
 	
-//check if button is pressed
-//if(pioA_ptr->PIO_PDSR & PIO_PA2)	
+	//check if button is pressed
+	//if(pioA_ptr->PIO_PDSR & PIO_PA2)	
+	
+	//toggle PA11 pin to check ISR timing
+//	pioA_ptr->PIO_CODR |= PIO_CODR_P11;
 	
 	//get adc channels 0 & 1 current reading
 	adc_ptr->ADC_CR = ADC_CR_START;
@@ -56,10 +58,14 @@ void TC0_Handler(void){
 	emg_voltage = adc_ptr->ADC_CDR[1];
 //	ecg_voltage = adc_ptr->ADC_CDR[2];
 	
+	//toggle PA11 pin to check ISR timing
+//	pioA_ptr->PIO_CODR |= PIO_CODR_P11;	
 	//get accel. data
-	if (spi_init_complete){
-//		update_accel_data();
+	if (spi_init_complete == 1 && adxl_data_ready == 1){
+		update_accel_data();
 	}
+	//toggle PA11 pin to check timing
+//	pioA_ptr->PIO_SODR |= PIO_SODR_P11;
 	
 	//if ADC reads more than threshold, turn on buzzer
 	if( (eda_voltage > voltage_to_adc(2.821)) 
@@ -91,22 +97,39 @@ void TC0_Handler(void){
 	
 	//clear TC0 interrupt flags
 	tc0_ptr->TC_CHANNEL[0].TC_SR;
+	
+	//toggle PA11 pin to check timing
+//	pioA_ptr->PIO_SODR |= PIO_SODR_P11;
+}
+
+void PIOA_Handler(void){
+	
+	//PA12
 }
 
 void PIOB_Handler(void){
 
-	//check if interrupt sent from right pin
+	//toggle PA11 pin to check ISR timing
+//	pioA_ptr->PIO_CODR |= PIO_CODR_P11;
+	
+	//check interrupt source on PB pins
 	if(pioB_ptr->PIO_ISR & PIO_ISR_P9){
 		
 		//Set ADXL data ready flag	
 		adxl_data_ready = 1;
-		
-		//turn on LED
-//		pioA_ptr->PIO_CODR = PIO_CODR_P6;
+		//check interrupt source on ADXL
+//		if((read_adxl(0x30, 0x00) & 0xF0) == 0x80){
+
+//			pioA_ptr->PIO_CODR = PIO_PA6;
+//		}
+
 	}
 	
 	//clear ISR flag
 	pioB_ptr->PIO_ISR;
+	
+	//toggle PA11 pin to check ISR timing
+//	pioA_ptr->PIO_SODR |= PIO_SODR_P11;
 }
 
 //main function
@@ -165,8 +188,8 @@ void enable_spi0_clk(void){
 	//disable PCK6 (for FLEXCOM0) to configure
 	PMC->PMC_SCDR = PMC_SCDR_PCK6;
 	
-	//set main clock as source for PCK0 (8Mhz) scale to 8Mhz/8
-	PMC->PMC_PCK[PMC_PCK_6] = PMC_PCK_CSS_MAIN_CLK | PMC_PCK_PRES_CLK_8;
+	//set main clock as source for PCK0 (8Mhz) scale to 8Mhz/4
+	PMC->PMC_PCK[PMC_PCK_6] = PMC_PCK_CSS_MAIN_CLK | PMC_PCK_PRES_CLK_2;
 	
 	//enable PCK6
 	PMC->PMC_SCER = PMC_SCER_PCK6;
@@ -182,8 +205,8 @@ void init_pio(void){
 	//enable pin PA6 as output (LED)
 	pioA_ptr->PIO_OER |= PIO_PA6;
 	
-	//set LED pin PA6 as low (LED is active low)
-//	pioA_ptr->PIO_CODR = PIO_PA6;
+	//enable pin PA11 as output (Debugging)
+	pioA_ptr->PIO_OER |= PIO_PA11;
 
 	//set LED pin PA6 as high (LED is active low)
 	pioA_ptr->PIO_SODR |= PIO_PA6;
@@ -370,21 +393,30 @@ void init_adxl_spi0(void){
 
 void init_adxl(void){
 
-	verify_adxl_spi0();
+//	verify_adxl_spi0();
 
-	//write to ADXL (two MSB bits in write mode should be 0 & 0)
-	//0x310B 13-bit mode, +-16g
+	//set to 13-bit mode, +-16g
 	write_adxl(0x31, 0x0B);
 	
-	//0x2D08 Start Measurement
+	//set Rate to 1600Hz
+	write_adxl(0x2C, 0x0E);
+	
+	//check to see if data rate is actually at 1600 Hz
+// 	if((read_adxl(0x2C, 0x00) & 0x0F) == 0xE){
+// 		
+// 		pioA_ptr->PIO_CODR = PIO_PA6;
+// 	}	
+	
+	//Start Measurement
 	write_adxl(0x2D, 0x08);
 	
-	//0x2F7F Map data_ready interrupt to INT1 pin
+	//Map data_ready interrupt to INT1 pin
 	write_adxl(0x2F, 0x7F);
 	
-	//0x2E80 Enable data_ready interrupt
+	//Enable data_ready interrupt
 	write_adxl(0x2E, 0x80);
 	
+	//Set flag so TC0 ISR can update axis data
 	spi_init_complete = 1;
 }
 
@@ -426,12 +458,6 @@ int32_t update_accel_data(void){
 	uint32_t adxlData1 = 0;
 	uint32_t adxlData2 = 0;
 	uint32_t adxlData3 = 0;
-	
-	//check if data is ready to be read
-	//if not ready, exit
-	if(adxl_data_ready == 0){
-		return 0;	
-	}
 	
 	//write to start data transfer
 	//read command (R = 1) multibyte bit on (MB = 1), address 0x32
@@ -504,12 +530,6 @@ int32_t update_accel_data(void){
 	else{
 		z_Axis_data = (adxlData3 & 0xFF00) | (adxlData2 & 0xFF);
 	}
-
-	if ((x_Axis_data < 0x00) || (y_Axis_data == 0x00)|| (z_Axis_data == 0x00)){
-		
-		//turn led on
-		pioA_ptr->PIO_SODR = PIO_SODR_P6;
-	}	
 		
 	return 1;
 }
@@ -519,7 +539,7 @@ void verify_adxl_spi0(void){
 	uint32_t deviceID = 0;
 	
 	//check SPI connection is solid by doing test read
-	//address 0x00 should contain 0xE5
+	//address = 0x00, data = don't care
 	
 	deviceID = read_adxl(0x00, 0x00);
 	
