@@ -12,7 +12,9 @@ Pio *pioB_ptr = PIOB;
 Tc *tc0_ptr = TC0;
 Adc *adc_ptr = ADC;
 Spi *spi0_ptr = SPI0;
+Spi *spi5_ptr = SPI5;
 Flexcom *fc0_ptr = FLEXCOM0;
+Flexcom *fc5_ptr = FLEXCOM5;
 
 //Global variables
 uint32_t eda_voltage = 0;
@@ -25,17 +27,20 @@ volatile int adxl_data_ready = 0;
 volatile int32_t x_Axis_data = 0;
 volatile int32_t y_Axis_data = 0;
 volatile int32_t z_Axis_data = 0;
+volatile int32_t adxl_irq_source = 0;
+volatile uint32_t fall_state = 0;
+volatile uint32_t fall_counter = 0;
 
 //function prototypes
 void enable_pio_clk(void);
-void enable_tc_clk(void);
+void enable_tc0_clk(void);
 void enable_adc_clk(void);
-void enable_i2c_clk(void);
 void enable_spi0_clk(void);
+void enable_spi5_clk(void);
 void init_pio(void);
-void init_tc(void);
+void init_tc0(void);
 void init_adc(void);
-void init_i2c(void);
+void init_ble_spi5(void);
 void init_adxl_spi0(void);
 void init_adxl(void);
 void verify_adxl_spi0(void);
@@ -43,54 +48,53 @@ void write_adxl(uint32_t address, uint32_t data);
 int32_t read_adxl(uint32_t address, uint32_t data);
 int32_t update_accel_data(void);
 uint32_t voltage_to_adc(float voltage);
+void fall_detector(void);
 
+//main sensor timer interrupt (sample rate = 1kHz)
 void TC0_Handler(void){
 	
-	//check if button is pressed
-	//if(pioA_ptr->PIO_PDSR & PIO_PA2)	
-	
 	//toggle PA11 pin to check ISR timing
-//	pioA_ptr->PIO_CODR |= PIO_CODR_P11;
+	pioA_ptr->PIO_CODR |= PIO_CODR_P11;
 	
 	//get adc channels 0 & 1 current reading
 	adc_ptr->ADC_CR = ADC_CR_START;
 	eda_voltage = adc_ptr->ADC_CDR[0];
 	emg_voltage = adc_ptr->ADC_CDR[1];
-//	ecg_voltage = adc_ptr->ADC_CDR[2];
-	
-	//toggle PA11 pin to check ISR timing
-//	pioA_ptr->PIO_CODR |= PIO_CODR_P11;	
+	ecg_voltage = adc_ptr->ADC_CDR[2];
+
 	//get accel. data
-	if (spi_init_complete == 1 && adxl_data_ready == 1){
-		update_accel_data();
-	}
-	//toggle PA11 pin to check timing
-//	pioA_ptr->PIO_SODR |= PIO_SODR_P11;
+  	if (spi_init_complete == 1){
+		if(adxl_data_ready == 1){
+ 			update_accel_data();
+		}
+		adxl_irq_source = read_adxl(0x30, 0x00);
+  	}
+	  
+	fall_detector();
 	
 	//if ADC reads more than threshold, turn on buzzer
 	if( (eda_voltage > voltage_to_adc(2.821)) 
 		|| (emg_voltage > voltage_to_adc(0.101)) ){
 		
 		// 50% duty cycle on TIOB (max volume)	
-		tc0_ptr->TC_CHANNEL[0].TC_RB = 7500; 
+		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; 
 		eda_voltage = 0;
 		emg_voltage = 0;
-		//edc_voltage = 0;
-	}
-	
+		ecg_voltage = 0;
+	}	
 	else{
 		
 		//0% duty cycle on TIOB (buzzer off)
 		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x0000; 
 		eda_voltage = 0;
 		emg_voltage = 0;
-		//edc_voltage = 0;
+		ecg_voltage = 0;
 	}
 	
+	//ADXL initialization timer
 	if(spi_init_timer != 100){
 		spi_init_timer++;
 	}
-	
 	else {
 		spi_init_begin = 1;
 	}
@@ -99,37 +103,59 @@ void TC0_Handler(void){
 	tc0_ptr->TC_CHANNEL[0].TC_SR;
 	
 	//toggle PA11 pin to check timing
-//	pioA_ptr->PIO_SODR |= PIO_SODR_P11;
+	pioA_ptr->PIO_SODR |= PIO_SODR_P11;
 }
 
 void PIOA_Handler(void){
+
+	//toggle PA11 pin to check ISR timing
+/*	pioA_ptr->PIO_CODR |= PIO_CODR_P11;*/
 	
-	//PA12
+//	if(pioA_ptr->PIO_ODSR & PIO_PA6){
+	if(pioA_ptr->PIO_ISR & PIO_ISR_P26){		
+		
+		//if LED on
+		if(pioA_ptr->PIO_ODSR & PIO_PA6){
+			
+			//turn LED ON
+			pioA_ptr->PIO_CODR |= PIO_PA6;
+		}
+		
+		else{
+			
+			//turn LED OFF
+			pioA_ptr->PIO_SODR |= PIO_PA6;
+		}
+	}
+	//clear ISR flag
+	pioA_ptr->PIO_ISR;
+	
+	//toggle PA11 pin to check ISR timing
+/*	pioA_ptr->PIO_SODR |= PIO_SODR_P11;	*/
 }
 
 void PIOB_Handler(void){
 
-	//toggle PA11 pin to check ISR timing
-//	pioA_ptr->PIO_CODR |= PIO_CODR_P11;
+// 	//toggle PA11 pin to check ISR timing
+// 	pioA_ptr->PIO_CODR |= PIO_CODR_P11;
 	
 	//check interrupt source on PB pins
 	if(pioB_ptr->PIO_ISR & PIO_ISR_P9){
 		
-		//Set ADXL data ready flag	
-		adxl_data_ready = 1;
-		//check interrupt source on ADXL
-//		if((read_adxl(0x30, 0x00) & 0xF0) == 0x80){
-
-//			pioA_ptr->PIO_CODR = PIO_PA6;
-//		}
-
-	}
 	
+	//check interrupt source
+// 	int_source = read_adxl(0x30, 0x00) & 0x80;
+// 	
+// 	if(int_source == 0x80){
+//		update_accel_data();
+		adxl_data_ready = 1;
+// 	}
+	}
 	//clear ISR flag
 	pioB_ptr->PIO_ISR;
 	
-	//toggle PA11 pin to check ISR timing
-//	pioA_ptr->PIO_SODR |= PIO_SODR_P11;
+// 	//toggle PA11 pin to check ISR timing
+// 	pioA_ptr->PIO_SODR |= PIO_SODR_P11;
 }
 
 //main function
@@ -141,7 +167,7 @@ int main (void)
 	//see conf_clock.h for possible clock sources
 	sysclk_init();
 	init_pio();
-	init_tc();
+	init_tc0();
 	init_adc();
 	init_adxl_spi0();
 	init_adxl();
@@ -159,7 +185,7 @@ void enable_pio_clk(void){
 	PMC->PMC_PCER0 |= PMC_PCER0_PID12;	
 }
 
-void enable_tc_clk(void){
+void enable_tc0_clk(void){
 
 	//enable TC clock (ID: 23) in PMC
 	PMC->PMC_PCER0 |= PMC_PCER0_PID23;
@@ -171,12 +197,6 @@ void enable_adc_clk(void){
 	PMC->PMC_PCER0 |= PMC_PCER0_PID29;
 }
 
-void enable_i2c_clk(void){
-	
-	//enable I2C0 clock (ID: 8)
-	PMC->PMC_PCER0 |= PMC_PCER0_PID8;
-}
-
 void enable_spi0_clk(void){
 	
 	/* SPI will use main clock as source
@@ -185,10 +205,10 @@ void enable_spi0_clk(void){
 	//enable SPI0 (a.k.a. FLEXCOM0) clk (ID: 8)
 	PMC->PMC_PCER0 |= PMC_PCER0_PID8;	
 	
-	//disable PCK6 (for FLEXCOM0) to configure
+	//disable PCK6 (for FLEXCOM0 & FLEXCOM1) to configure
 	PMC->PMC_SCDR = PMC_SCDR_PCK6;
 	
-	//set main clock as source for PCK0 (8Mhz) scale to 8Mhz/4
+	//set main clock as source for PCK6 (8Mhz) scale to 8Mhz/2
 	PMC->PMC_PCK[PMC_PCK_6] = PMC_PCK_CSS_MAIN_CLK | PMC_PCK_PRES_CLK_2;
 	
 	//enable PCK6
@@ -196,6 +216,15 @@ void enable_spi0_clk(void){
 	
 	//wait for PCK6 to be ready
 	while(!(PMC->PMC_SR & PMC_SR_PCKRDY6)){}
+}
+
+void enable_spi5_clk(void){
+	
+	/* SPI will use main clock as source
+	b/c it is limited to 3 Mhz maximum */
+	
+	//enable SPI1 (a.k.a. FLEXCOM1) clk (ID: 9)
+	PMC->PMC_PCER0 |= PMC_PCER0_PID9;	
 }
 
 void init_pio(void){
@@ -216,9 +245,12 @@ void init_pio(void){
 	
 	//enable switch pin control by PIO [PA2]
 	pioA_ptr->PIO_PER |= PIO_PA2;
+	
+	//code to check if button is pressed
+	//if(pioA_ptr->PIO_PDSR & PIO_PA2){}	
 }
 
-void init_tc(void){
+void init_tc0(void){
 		
 	//set peripheral function for tc (B function) on pin PA0
 	pioA_ptr->PIO_ABCDSR[0] |= PIO_ABCDSR_P0;
@@ -233,7 +265,7 @@ void init_tc(void){
 	pioA_ptr->PIO_PDR |= PIO_PA1;
 	
 	//enable pmc periph clock for tc
-	enable_tc_clk();
+	enable_tc0_clk();
 	
 	/*TC0 Setup*/
 	//temporarily disable TC clk input
@@ -252,9 +284,9 @@ void init_tc(void){
 		| TC_CMR_BCPC_CLEAR;			//clear PA1 on RC match
 	
 	//set period & duty cycle (RC value = (120Mhz * prescaler)/(goal frequency))
-	tc0_ptr->TC_CHANNEL[0].TC_RA = 7500; //duty cycle for TIOA
-	tc0_ptr->TC_CHANNEL[0].TC_RB = 7500; //duty cycle for TIOB
-	tc0_ptr->TC_CHANNEL[0].TC_RC = 15000; //period (for TIOA & TIOB)
+	tc0_ptr->TC_CHANNEL[0].TC_RA = 0x7530; //duty cycle for TIOA
+	tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; //duty cycle for TIOB
+	tc0_ptr->TC_CHANNEL[0].TC_RC = 0xEA60; //period (for TIOA & TIOB)
 	
 	//enable interrupt on RC compare match
 	tc0_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
@@ -266,7 +298,7 @@ void init_tc(void){
 	//Enable TC0 Interrupt in NVIC
 	NVIC_DisableIRQ(TC0_IRQn);
 	NVIC_ClearPendingIRQ(TC0_IRQn);
-	NVIC_SetPriority(TC0_IRQn, 0);
+	NVIC_SetPriority(TC0_IRQn, 1);
 	NVIC_EnableIRQ(TC0_IRQn);
 }
 
@@ -291,8 +323,101 @@ void init_adc(void){
 	enable_adc_clk();	
 }
 
-void init_i2c(void){
+void init_ble_spi5(void){
 	
+	//disable SPI to configure
+	spi5_ptr->SPI_CR = SPI_CR_SPIDIS;
+	
+	//reset SPI
+	spi5_ptr->SPI_CR = SPI_CR_SWRST;
+	
+	//set peripheral function A for SPI on pin PA12 (MISO)
+	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P12;
+	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P12;
+
+	//set peripheral function A for SPI on pin PA13 (MOSI)
+	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P13;
+	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P13;
+	
+	//set peripheral function A for SPI on pin PA14 (SPCK/SCK)
+	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P14;
+	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P14;
+	
+	//set peripheral function A for SPI on pin PA11 (NPCS0/REQN)
+	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P11;
+	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P11;
+	
+// 	//enable PIO control of PB09 for use as input for INT1
+// 	//enable PIO control of PA12 for use as input for INT2
+// 	pioB_ptr->PIO_PER |= PIO_PB9;
+// 	pioA_ptr->PIO_PER |= PIO_PA12;
+// 	
+// 	//disable output on PB9
+// 	//disable output on PA12
+// 	pioB_ptr->PIO_ODR |= PIO_PB9;
+// 	pioA_ptr->PIO_ODR |= PIO_PA12;
+// 	
+// 	//enable interrupt on PB09
+// 	//enable interrupt on PA12
+// 	pioB_ptr->PIO_IER |= PIO_PB9;
+// 	pioA_ptr->PIO_IER |= PIO_PA12;
+// 	
+// 	//enable additional interrupt settings for PB09
+// 	//enable additional interrupt settings for PA12
+// 	pioB_ptr->PIO_AIMER |= PIO_PB9;
+// 	pioA_ptr->PIO_AIMER |= PIO_PA12;
+// 	
+// 	//enable edge detection for PB09
+// 	pioB_ptr->PIO_ESR |= PIO_PB9;
+// 	pioA_ptr->PIO_ESR |= PIO_PA12;
+// 	
+// 	//set to detect rising edge for PB09 (INT1)
+// 	//set to detect rising edge for PA12 (INT2)
+// 	pioB_ptr->PIO_REHLSR |= PIO_PB9;
+// 	pioA_ptr->PIO_REHLSR |= PIO_PA12;
+	
+	//disable PIO control of PA11, PA12, PA13, & PA14
+	//so SPI1 can control pins
+	pioA_ptr->PIO_PDR |= PIO_PA11;
+	pioA_ptr->PIO_PDR |= PIO_PA12;
+	pioA_ptr->PIO_PDR |= PIO_PA13;
+	pioA_ptr->PIO_PDR |= PIO_PA14;
+	
+	//set flexcom1 mode to SPI
+	fc5_ptr->FLEXCOM_MR = FLEXCOM_MR_OPMODE_SPI;
+	
+	//set as master, use peripheral clock, mode fault disable
+	spi5_ptr->SPI_MR = SPI_MR_MSTR | SPI_MR_BRSRCCLK_PMC_PCK
+	| SPI_MR_PCS(0) | SPI_MR_MODFDIS;
+	
+	//set to fixed peripheral mode
+	spi5_ptr->SPI_MR &= ~SPI_MR_PS;
+
+	//set to direct connection to peripheral
+	spi5_ptr->SPI_MR &= ~SPI_MR_PCSDEC;
+
+	//local loopback disabled
+	spi5_ptr->SPI_MR &= ~SPI_MR_LLB;
+	
+	//chip select settings
+	spi5_ptr->SPI_CSR[0] =	SPI_CSR_BITS_16_BIT	//16-bit transfers
+							| SPI_CSR_SCBR(2)		//bit rate 1/2 pclk
+							| SPI_CSR_DLYBS(4)		//delay after cs before sck
+							| SPI_CSR_DLYBCT(0);	//0 delay btwn multibyte transfers
+	
+	//CPHA = 1 (NCPHA = 0)
+	spi5_ptr->SPI_CSR[0] &= ~SPI_CSR_NCPHA;
+	
+	//clear CSAAT (programmable clock source)
+	spi5_ptr->SPI_CSR[0] &= ~SPI_CSR_CSAAT;
+
+	//next transfer is last
+	spi5_ptr->SPI_CR = SPI_CR_LASTXFER;
+
+	enable_spi5_clk();
+	
+	//enable SPI
+	spi5_ptr->SPI_CR = SPI_CR_SPIEN;	
 }
 
 void init_adxl_spi0(void){
@@ -320,29 +445,40 @@ void init_adxl_spi0(void){
  	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P25;
 	 
 	//enable PIO control of PB09 for use as input for INT1
+	//enable PIO control of PA26 for use as input for INT2
 	pioB_ptr->PIO_PER |= PIO_PB9;
+	pioA_ptr->PIO_PER |= PIO_PA26;
 	
-	//disable output
+	//disable output on PB9
+	//disable output on PA26
 	pioB_ptr->PIO_ODR |= PIO_PB9;
+	pioA_ptr->PIO_ODR |= PIO_PA26;
 	
 	//enable interrupt on PB09
+	//enable interrupt on PA26
 	pioB_ptr->PIO_IER |= PIO_PB9;
+	pioA_ptr->PIO_IER |= PIO_PA26;
 	
 	//enable additional interrupt settings for PB09
+	//enable additional interrupt settings for PA26
 	pioB_ptr->PIO_AIMER |= PIO_PB9;
+	pioA_ptr->PIO_AIMER |= PIO_PA26;
 	
 	//enable edge detection for PB09
 	pioB_ptr->PIO_ESR |= PIO_PB9;
+	pioA_ptr->PIO_ESR |= PIO_PA26;
 	
 	//set to detect rising edge for PB09 (INT1)
+	//set to detect rising edge for PA26 (INT2)
 	pioB_ptr->PIO_REHLSR |= PIO_PB9;
+	pioA_ptr->PIO_REHLSR |= PIO_PA26;
 	
-	//disable PIO control of PA09, PB00, PA25, & PA10
+	//disable PIO control of PA09, PB00, PA26, & PA10
 	//so SPI0 can control pins
 	pioA_ptr->PIO_PDR |= PIO_PA9;
 	pioB_ptr->PIO_PDR |= PIO_PB0;
 	pioA_ptr->PIO_PDR |= PIO_PA10;
-	pioA_ptr->PIO_PDR |= PIO_PA25;
+	pioA_ptr->PIO_PDR |= PIO_PA26;
 	
 	//set flexcom0 mode to SPI
 	fc0_ptr->FLEXCOM_MR = FLEXCOM_MR_OPMODE_SPI;	
@@ -376,8 +512,14 @@ void init_adxl_spi0(void){
 	//enable PIOB interrupt for data ready interrupt (INT1) in NVIC
 	NVIC_DisableIRQ(PIOB_IRQn);
 	NVIC_ClearPendingIRQ(PIOB_IRQn);
-	NVIC_SetPriority(PIOB_IRQn, 1);
+	NVIC_SetPriority(PIOB_IRQn, 0);
 	NVIC_EnableIRQ(PIOB_IRQn);
+
+	//enable PIOA interrupt for freefall (INT2) in NVIC
+	NVIC_DisableIRQ(PIOA_IRQn);
+	NVIC_ClearPendingIRQ(PIOA_IRQn);
+	NVIC_SetPriority(PIOA_IRQn, 0);
+	NVIC_EnableIRQ(PIOA_IRQn);
 
 	//next transfer is last
 	spi0_ptr->SPI_CR = SPI_CR_LASTXFER;
@@ -393,28 +535,49 @@ void init_adxl_spi0(void){
 
 void init_adxl(void){
 
-//	verify_adxl_spi0();
-
 	//set to 13-bit mode, +-16g
 	write_adxl(0x31, 0x0B);
 	
-	//set Rate to 1600Hz
-	write_adxl(0x2C, 0x0E);
+	//set rate to 100 Hz
+	write_adxl(0x2C, 0x0F);
 	
-	//check to see if data rate is actually at 1600 Hz
-// 	if((read_adxl(0x2C, 0x00) & 0x0F) == 0xE){
-// 		
-// 		pioA_ptr->PIO_CODR = PIO_PA6;
-// 	}	
+ 	//set freefall min threshold (750 mg)
+	write_adxl(0x28, 0x0C);
+	
+	//set freefall min time (30 ms)
+	write_adxl(0x29, 0x06);
+	
+	//set activity threshold (2g)
+	write_adxl(0x25, 0x20);
+	
+	//set inactivity threshold (0.1875g)
+	write_adxl(0x26, 0x03);
+	
+	//enable xyz axis for activity & inactivity detection
+	//set activity to dc-coupled, inactivity to ac-coupled
+	write_adxl(0x27, 0x7F);
+	
+	//set single tap g min treshold (2.5g)
+//	write_adxl(0x1D, 0x28);
+	
+	//set tap duration maximum (50ms);
+//	write_adxl(0x21, 0x50);
+	
+	//enable 3 axis tap detection
+//	write_adxl(0x2A, 0x03);
 	
 	//Start Measurement
 	write_adxl(0x2D, 0x08);
 	
 	//Map data_ready interrupt to INT1 pin
+	//others (inc. single tap & freefall) to INT2 pin
 	write_adxl(0x2F, 0x7F);
 	
-	//Enable data_ready interrupt
-	write_adxl(0x2E, 0x80);
+	//Enable data_ready, activity, inactivity & freefall interrupts
+	write_adxl(0x2E, 0x9C);
+	
+	//clear interrupts
+	read_adxl(0x30, 0x00);
 	
 	//Set flag so TC0 ISR can update axis data
 	spi_init_complete = 1;
@@ -539,7 +702,7 @@ void verify_adxl_spi0(void){
 	uint32_t deviceID = 0;
 	
 	//check SPI connection is solid by doing test read
-	//address = 0x00, data = don't care
+	//address = 0x00, data/command = don't care
 	
 	deviceID = read_adxl(0x00, 0x00);
 	
@@ -548,7 +711,7 @@ void verify_adxl_spi0(void){
 	if(deviceID == 0xE5){
 		
 		//set LED pin PA6 as low (LED is active low)
-		pioA_ptr->PIO_CODR = PIO_PA6;
+		pioA_ptr->PIO_CODR |= PIO_PA6;
 	}
 }
 
@@ -559,4 +722,101 @@ uint32_t voltage_to_adc(float voltage){
 	//takes voltage value &
 	//returns scaled bit value
 	return ((uint32_t) (voltage * 4095)/3.3);
+}
+
+void fall_detector(void){
+	
+	//fall detection state machine
+	switch(fall_state){
+		
+		//default state, no freefall detected
+		case 0:
+		
+			if(adxl_irq_source & 0x30){
+				fall_state = 1;
+			}
+		break;
+		
+		//freefall detected, start counter
+		case 1:
+		
+			fall_counter++;
+		
+			//check for impact
+			if(adxl_irq_source & 0x10){
+				fall_state = 2;
+				fall_counter = 0;
+			}
+		
+			if(fall_counter > 200){
+				fall_state = 0;
+				fall_counter = 0;
+			}
+		break;
+		
+		//check	for inactivity after impact
+		case 2:
+		
+			fall_counter++;
+		
+			//check inactivity trigger
+			if(adxl_irq_source & 0x08){
+				fall_state = 3;
+				fall_counter = 0;
+			}
+		
+			//timeout check
+			if(fall_counter > 3500){
+				fall_state = 0;
+				fall_counter = 0;
+			}
+		break;
+		
+		//check if final state different from initial
+		case 3:
+		
+			//compare initial xyz vector with current xyz
+			fall_state	= 4;
+		break;
+		
+		//check how long inactivity is
+		case 4:
+		
+			fall_counter++;
+			
+			//disable interrupts
+			write_adxl(0x2E, 0x80);
+		
+			//set activity threshold to 0.5g
+			write_adxl(0x25, 0x08);
+		
+			//set activity to ac-coupled
+			write_adxl(0x27, 0xFF);
+		
+			//set inactivity threshold to 0.1875g
+			write_adxl(0x26, 0x0A);
+		
+			//enable interrupts
+			write_adxl(0x2E, 0x9C);
+		
+			//check if activity int. triggered
+			if(adxl_irq_source & 0x10){
+				fall_state = 0;
+				fall_counter = 0;
+			}
+		
+			//check if 10s inactivity triggered
+			else if (adxl_irq_source & 0x08){
+				fall_counter = 0;
+				fall_state = 0;
+				//generate critical alert
+			}
+		
+			//timeout check
+			if(fall_counter > 10500){
+				fall_state = 0;
+				fall_counter = 0;
+			}
+		break;
+	}
 }
