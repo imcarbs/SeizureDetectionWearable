@@ -12,9 +12,9 @@ Pio *pioB_ptr = PIOB;
 Tc *tc0_ptr = TC0;
 Adc *adc_ptr = ADC;
 Spi *spi0_ptr = SPI0;
-Spi *spi5_ptr = SPI5;
+Twi *twi3_ptr = TWI3;
 Flexcom *fc0_ptr = FLEXCOM0;
-Flexcom *fc5_ptr = FLEXCOM5;
+Flexcom *fc3_ptr = FLEXCOM3;
 
 //Global variables
 uint32_t eda_voltage = 0;
@@ -24,6 +24,7 @@ uint32_t old_eda_voltage = 0;
 uint32_t old_emg_voltage = 0;
 uint32_t old_ecg_voltage = 0;
 uint32_t spi_init_timer = 0;
+uint32_t ble_data = 0;
 volatile int spi_init_complete = 0;
 volatile int spi_init_begin = 0;
 volatile int adxl_data_ready = 0;
@@ -38,15 +39,17 @@ volatile uint32_t fall_counter = 0;
 void enable_pio_clk(void);
 void enable_tc0_clk(void);
 void enable_adc_clk(void);
+void enable_twi3_clk(void);
 void enable_spi0_clk(void);
-void enable_spi5_clk(void);
 void init_pio(void);
 void init_tc0(void);
 void init_adc(void);
-void init_ble_spi5(void);
+void init_ble_twi3(void);
 void init_adxl_spi0(void);
 void init_adxl(void);
 void verify_adxl_spi0(void);
+uint32_t read_ble(void);
+void write_ble(uint32_t data);
 void write_adxl(uint32_t address, uint32_t data);
 int32_t read_adxl(uint32_t address, uint32_t data);
 int32_t update_accel_data(void);
@@ -70,8 +73,8 @@ void TC0_Handler(void){
 	//get adc channels 0 & 1 current reading
 	adc_ptr->ADC_CR = ADC_CR_START;
 	eda_voltage = adc_ptr->ADC_CDR[0];
-	emg_voltage = adc_ptr->ADC_CDR[1];
-	ecg_voltage = adc_ptr->ADC_CDR[2];
+// 	emg_voltage = adc_ptr->ADC_CDR[1];
+// 	ecg_voltage = adc_ptr->ADC_CDR[2];
 
 	//get accel. data
   	if (spi_init_complete == 1){
@@ -82,25 +85,25 @@ void TC0_Handler(void){
   	}
 	 
 	//run fall detection algorithm
-	fall_detector();
+//	fall_detector();
 	
 	//if ADC reads more than threshold, turn on buzzer
-	if( (eda_voltage > voltage_to_adc(2.821)) 
+	if( (eda_voltage > voltage_to_adc(1.3)) 
 		|| (emg_voltage > voltage_to_adc(0.101)) ){
 		
 		// 50% duty cycle on TIOB (max volume)	
-		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; 
-		old_eda_voltage = eda_voltage;
-		old_emg_voltage = emg_voltage;
-		old_ecg_voltage = ecg_voltage;
+//		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; 
+// 		old_eda_voltage = eda_voltage;
+// 		old_emg_voltage = emg_voltage;
+// 		old_ecg_voltage = ecg_voltage;
 	}	
 	else{
 		
 		//0% duty cycle on TIOB (buzzer off)
-		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x0000; 
-		old_eda_voltage = eda_voltage;
-		old_emg_voltage = emg_voltage;
-		old_ecg_voltage = ecg_voltage;
+//		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x0000; 
+// 		old_eda_voltage = eda_voltage;
+// 		old_emg_voltage = emg_voltage;
+// 		old_ecg_voltage = ecg_voltage;
 	}
 	
 	//clear TC0 interrupt flags
@@ -166,6 +169,7 @@ int main (void)
 	init_tc0();
 	init_adc();
 	init_adxl_spi0();
+	init_ble_twi3();
 	init_adxl();
 	
 	//empty while loop to run SAMG55 indefinitely
@@ -173,10 +177,10 @@ int main (void)
 }
 
 void enable_pio_clk(void){
-		
+
 	//Enable PIOA clock (ID: 11)
 	PMC->PMC_PCER0 |= PMC_PCER0_PID11;
-		
+
 	//Enable PIOB clock (ID: 12)
 	PMC->PMC_PCER0 |= PMC_PCER0_PID12;	
 }
@@ -193,6 +197,15 @@ void enable_adc_clk(void){
 	PMC->PMC_PCER0 |= PMC_PCER0_PID29;
 }
 
+void enable_twi3_clk(void){
+	
+	//enable TWI3 clock (ID:19)
+	//use PCK6 (already set from enable SPI0 clk)
+	//enable TWI3 aka FLEXCOM3 clk ID: 19
+	PMC->PMC_PCER0 |= PMC_PCER0_PID19;
+	
+}
+
 void enable_spi0_clk(void){
 	
 	/* SPI will use main clock as source
@@ -201,7 +214,7 @@ void enable_spi0_clk(void){
 	//enable SPI0 (a.k.a. FLEXCOM0) clk (ID: 8)
 	PMC->PMC_PCER0 |= PMC_PCER0_PID8;	
 	
-	//disable PCK6 (for FLEXCOM0 & FLEXCOM1) to configure
+	//disable PCK6 (for FLEXCOM0 & FLEXCOM1 , 2, 3) to configure
 	PMC->PMC_SCDR = PMC_SCDR_PCK6;
 	
 	//set main clock as source for PCK6 (8Mhz) scale to 8Mhz/2
@@ -214,14 +227,6 @@ void enable_spi0_clk(void){
 	while(!(PMC->PMC_SR & PMC_SR_PCKRDY6)){}
 }
 
-void enable_spi5_clk(void){
-	
-	/* SPI will use main clock as source
-	b/c it is limited to 3 Mhz maximum */
-	
-	//enable SPI1 (a.k.a. FLEXCOM1) clk (ID: 9)
-	PMC->PMC_PCER0 |= PMC_PCER0_PID9;	
-}
 
 void init_pio(void){
 
@@ -281,7 +286,8 @@ void init_tc0(void){
 	
 	//set period & duty cycle (RC value = (120Mhz * prescaler)/(goal frequency))
 	tc0_ptr->TC_CHANNEL[0].TC_RA = 0x7530; //duty cycle for TIOA
-	tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; //duty cycle for TIOB
+//	tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; //duty cycle for TIOB
+	tc0_ptr->TC_CHANNEL[0].TC_RB = 0x0000; //duty cycle for TIOB	
 	tc0_ptr->TC_CHANNEL[0].TC_RC = 0xEA60; //period (for TIOA & TIOB)
 	
 	//enable interrupt on RC compare match
@@ -319,78 +325,83 @@ void init_adc(void){
 	enable_adc_clk();	
 }
 
-void init_ble_spi5(void){
-	
-	//disable SPI to configure
-	spi5_ptr->SPI_CR = SPI_CR_SPIDIS;
-	
-	//reset SPI
-	spi5_ptr->SPI_CR = SPI_CR_SWRST;
-	
-	//set peripheral function A for SPI on pin PA12 (MISO)
-	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P12;
-	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P12;
+void init_ble_twi3(void){
+		
+	//set flexcom3 mode to TWI
+	fc3_ptr->FLEXCOM_MR = FLEXCOM_MR_OPMODE_TWI;
+		
+	//set peripheral function A for TWI on PA03 (Data)
+	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P3;
+	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P3;
 
-	//set peripheral function A for SPI on pin PA13 (MOSI)
-	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P13;
-	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P13;
+	//set peripheral function A for SPI on pin PA04 (Clk)
+	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P4;
+	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P4;
 	
-	//set peripheral function A for SPI on pin PA14 (SPCK/SCK)
-	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P14;
-	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P14;
+	//disable PIO control of PA03, PA04 so TWI3 can control pins
+	pioA_ptr->PIO_PDR |= PIO_PA3;
+	pioA_ptr->PIO_PDR |= PIO_PA4;
 	
-	//set peripheral function A for SPI on pin PA11 (NPCS0/REQN)
-	pioA_ptr->PIO_ABCDSR[0] &= ~PIO_ABCDSR_P11;
-	pioA_ptr->PIO_ABCDSR[1] &= ~PIO_ABCDSR_P11;
+	//set device address: 0x08
+	twi3_ptr->TWI_MMR = TWI_MMR_DADR(0x08);
 	
-	//disable PIO control of PA11, PA12, PA13, & PA14
-	//so SPI1 can control pins
-	pioA_ptr->PIO_PDR |= PIO_PA11;
-	pioA_ptr->PIO_PDR |= PIO_PA12;
-	pioA_ptr->PIO_PDR |= PIO_PA13;
-	pioA_ptr->PIO_PDR |= PIO_PA14;
+	//clock waveform generator (set to ~69kHz data rate)
+	twi3_ptr->TWI_CWGR = TWI_CWGR_BRSRCCLK_PMC_PCK
+						 | TWI_CWGR_CHDIV(0x01)
+						 | TWI_CWGR_CLDIV(0x01)
+						 | TWI_CWGR_CKDIV(0x05);
+						 
+	//disable slave mode, disable high speed mode
+	twi3_ptr->TWI_CR = TWI_CR_SVDIS | TWI_CR_HSDIS;	
 	
-	//enable pin (pull up resistor) [PA05]
-	pioA_ptr->PIO_PUER |= PIO_PUER_P5;
+	enable_twi3_clk();
 	
-	//enable pin control by PIO [PA05]
-	pioA_ptr->PIO_PER |= PIO_PER_P5;
+	//enable master mode
+	twi3_ptr->TWI_CR |= TWI_CR_MSEN;
 	
-	//set flexcom1 mode to SPI
-	fc5_ptr->FLEXCOM_MR = FLEXCOM_MR_OPMODE_SPI;
+//	write_ble(15);
+	ble_data = read_ble();
 	
-	//set as master, use peripheral clock, mode fault disable
-	spi5_ptr->SPI_MR = SPI_MR_MSTR | SPI_MR_BRSRCCLK_PMC_PCK
-					   | SPI_MR_PCS(0) | SPI_MR_MODFDIS;
-	
-	//set to fixed peripheral mode
-	spi5_ptr->SPI_MR &= ~SPI_MR_PS;
+	if(ble_data == 9){
+		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; //duty cycle for TIOB		
+	}		 
+}
 
-	//set to direct connection to peripheral
-	spi5_ptr->SPI_MR &= ~SPI_MR_PCSDEC;
+void write_ble(uint32_t data){
+	
+	//set master to write mode (MREAD = 0)
+	twi3_ptr->TWI_MMR &= ~TWI_MMR_MREAD;
+	
+	//write: (automatically handles start condition)
+	twi3_ptr->TWI_THR = data;
+	twi3_ptr->TWI_CR = TWI_CR_STOP;
+	
+	//wait for acknowledge from slave
+	while(!(twi3_ptr->TWI_SR & TWI_SR_TXRDY)){}
+	
+	//wait for stop acknowledge from slave
+	while(!(twi3_ptr->TWI_SR & TWI_SR_TXCOMP)){}
+}
 
-	//local loopback disabled
-	spi5_ptr->SPI_MR &= ~SPI_MR_LLB;
+uint32_t read_ble(void){
 	
-	//chip select settings
-	spi5_ptr->SPI_CSR[0] =	SPI_CSR_BITS_8_BIT		//8-bit transfers
-							| SPI_CSR_SCBR(2)		//bit rate 1/2 pclk
-							| SPI_CSR_DLYBS(4)		//delay after cs before sck
-							| SPI_CSR_DLYBCT(0);	//0 delay btwn multibyte transfers
+	uint32_t read_data = 0;
 	
-	//CPHA = 1 (NCPHA = 0)
-	spi5_ptr->SPI_CSR[0] &= ~SPI_CSR_NCPHA;
+	//set master to read mode (MREAD = 1)
+	twi3_ptr->TWI_MMR |= TWI_MMR_MREAD;
 	
-	//clear CSAAT (programmable clock source)
-	spi5_ptr->SPI_CSR[0] &= ~SPI_CSR_CSAAT;
-
-	//next transfer is last
-	spi5_ptr->SPI_CR = SPI_CR_LASTXFER;
-
-	enable_spi5_clk();
+	//send start and stop conditions
+	twi3_ptr->TWI_CR = TWI_CR_START | TWI_CR_STOP;
 	
-	//enable SPI
-	spi5_ptr->SPI_CR = SPI_CR_SPIEN;
+	//wait for received data to be ready	
+	while(!(twi3_ptr->TWI_SR & TWI_SR_RXRDY)){}
+		
+	read_data = twi3_ptr->TWI_RHR;
+			
+	//wait for transfer to complete
+	while(!(twi3_ptr->TWI_SR & TWI_SR_TXCOMP)){}
+			
+	return read_data;
 }
 
 void init_adxl_spi0(void){
