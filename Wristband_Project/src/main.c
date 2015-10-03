@@ -28,6 +28,7 @@ uint32_t ble_data = 0;
 volatile int spi_init_complete = 0;
 volatile int spi_init_begin = 0;
 volatile int adxl_data_ready = 0;
+volatile int ble_ready = 0;
 volatile int32_t x_Axis_data = 0;
 volatile int32_t y_Axis_data = 0;
 volatile int32_t z_Axis_data = 0;
@@ -60,7 +61,7 @@ void fall_detector(void);
 void TC0_Handler(void){
 	
 	//toggle PA29 pin to check ISR timing
-//	pioA_ptr->PIO_CODR |= PIO_CODR_P29;
+	pioA_ptr->PIO_CODR |= PIO_CODR_P29;
 
 		//ADXL initialization timer
 	if(spi_init_timer != 100){
@@ -85,7 +86,10 @@ void TC0_Handler(void){
   	}
 	
 	//update bluetooth data
-	ble_data = read_ble(); 
+// 	if(ble_ready == 1){
+// 	//	ble_data = read_ble(); 
+// 	}
+	
 	
 	//run fall detection algorithm
 //	fall_detector();
@@ -95,29 +99,34 @@ void TC0_Handler(void){
 		|| (emg_voltage > voltage_to_adc(0.101)) ){
 		
 		// 50% duty cycle on TIOB (max volume)	
-//		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; 
+		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; 
 // 		old_eda_voltage = eda_voltage;
 // 		old_emg_voltage = emg_voltage;
 // 		old_ecg_voltage = ecg_voltage;
 
 		//send alert via bluetooth if threshold met
-		write_ble(1);	
+		if(ble_ready == 1){
+			write_ble('x');	
+		}
+		
 	}	
 	else{
 		
 		//0% duty cycle on TIOB (buzzer off)
-//		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x0000; 
+		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x0000; 
 // 		old_eda_voltage = eda_voltage;
 // 		old_emg_voltage = emg_voltage;
 // 		old_ecg_voltage = ecg_voltage;
-		write_ble(2);
+		if(ble_ready == 1){
+//			write_ble(2);
+		}
 	}
 	
 	//clear TC0 interrupt flags
 	tc0_ptr->TC_CHANNEL[0].TC_SR;
 	
 	//toggle PA29 pin to check timing
-//	pioA_ptr->PIO_SODR |= PIO_SODR_P29;
+	pioA_ptr->PIO_SODR |= PIO_SODR_P29;
 }
 
 void PIOA_Handler(void){
@@ -365,6 +374,7 @@ void init_ble_twi3(void){
 	//enable master mode
 	twi3_ptr->TWI_CR |= TWI_CR_MSEN;
 	
+	ble_ready = 1;
 //	write_ble(15);
 // 	ble_data = read_ble();
 // 	
