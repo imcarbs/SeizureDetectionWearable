@@ -83,7 +83,10 @@ void TC0_Handler(void){
 		}
 		adxl_irq_source = read_adxl(0x30, 0x00);
   	}
-	 
+	
+	//update bluetooth data
+	ble_data = read_ble(); 
+	
 	//run fall detection algorithm
 //	fall_detector();
 	
@@ -96,6 +99,9 @@ void TC0_Handler(void){
 // 		old_eda_voltage = eda_voltage;
 // 		old_emg_voltage = emg_voltage;
 // 		old_ecg_voltage = ecg_voltage;
+
+		//send alert via bluetooth if threshold met
+		write_ble(1);	
 	}	
 	else{
 		
@@ -104,6 +110,7 @@ void TC0_Handler(void){
 // 		old_eda_voltage = eda_voltage;
 // 		old_emg_voltage = emg_voltage;
 // 		old_ecg_voltage = ecg_voltage;
+		write_ble(2);
 	}
 	
 	//clear TC0 interrupt flags
@@ -226,7 +233,6 @@ void enable_spi0_clk(void){
 	//wait for PCK6 to be ready
 	while(!(PMC->PMC_SR & PMC_SR_PCKRDY6)){}
 }
-
 
 void init_pio(void){
 
@@ -360,11 +366,11 @@ void init_ble_twi3(void){
 	twi3_ptr->TWI_CR |= TWI_CR_MSEN;
 	
 //	write_ble(15);
-	ble_data = read_ble();
-	
-	if(ble_data == 9){
-		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; //duty cycle for TIOB		
-	}		 
+// 	ble_data = read_ble();
+// 	
+// 	if(ble_data == 9){
+// 		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; //duty cycle for TIOB		
+// 	}		 
 }
 
 void write_ble(uint32_t data){
