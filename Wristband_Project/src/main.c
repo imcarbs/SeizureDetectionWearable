@@ -25,6 +25,7 @@ uint32_t old_emg_voltage = 0;
 uint32_t old_ecg_voltage = 0;
 uint32_t spi_init_timer = 0;
 uint32_t ble_data = 0;
+uint8_t sensor_data = 0;
 volatile int spi_init_complete = 0;
 volatile int spi_init_begin = 0;
 volatile int adxl_data_ready = 0;
@@ -51,6 +52,7 @@ void init_adxl(void);
 void verify_adxl_spi0(void);
 uint32_t read_ble(void);
 void write_ble(uint32_t data);
+/*void write_mult_ble(uint32_t data, uint32_t bytes);*/
 void write_adxl(uint32_t address, uint32_t data);
 int32_t read_adxl(uint32_t address, uint32_t data);
 int32_t update_accel_data(void);
@@ -59,7 +61,7 @@ void fall_detector(void);
 
 //main sensor timer interrupt (sample rate = 1kHz)
 void TC0_Handler(void){
-	
+
 	//toggle PA29 pin to check ISR timing
 	pioA_ptr->PIO_CODR |= PIO_CODR_P29;
 
@@ -86,40 +88,33 @@ void TC0_Handler(void){
   	}
 	
 	//update bluetooth data
-// 	if(ble_ready == 1){
-// 	//	ble_data = read_ble(); 
-// 	}
-	
+ 	if(ble_ready == 1){
+ 		ble_data = read_ble(); 
+ 	}	
 	
 	//run fall detection algorithm
-//	fall_detector();
+	fall_detector();
 	
+	sensor_data = eda_voltage*(0.0622);
+	if(ble_ready == 1){
+		write_ble(sensor_data);
+	}
 	//if ADC reads more than threshold, turn on buzzer
-	if( (eda_voltage > voltage_to_adc(1.3)) 
+	if( (eda_voltage > voltage_to_adc(2.1)) 
 		|| (emg_voltage > voltage_to_adc(0.101)) ){
 		
 		// 50% duty cycle on TIOB (max volume)	
 		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; 
-// 		old_eda_voltage = eda_voltage;
-// 		old_emg_voltage = emg_voltage;
-// 		old_ecg_voltage = ecg_voltage;
 
 		//send alert via bluetooth if threshold met
-		if(ble_ready == 1){
-			write_ble('x');	
+		if(ble_ready == 1){			
+	//		write_ble(3);	
 		}
 		
 	}	
 	else{
-		
 		//0% duty cycle on TIOB (buzzer off)
 		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x0000; 
-// 		old_eda_voltage = eda_voltage;
-// 		old_emg_voltage = emg_voltage;
-// 		old_ecg_voltage = ecg_voltage;
-		if(ble_ready == 1){
-//			write_ble(2);
-		}
 	}
 	
 	//clear TC0 interrupt flags
@@ -374,13 +369,7 @@ void init_ble_twi3(void){
 	//enable master mode
 	twi3_ptr->TWI_CR |= TWI_CR_MSEN;
 	
-	ble_ready = 1;
-//	write_ble(15);
-// 	ble_data = read_ble();
-// 	
-// 	if(ble_data == 9){
-// 		tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; //duty cycle for TIOB		
-// 	}		 
+	ble_ready = 1;	 
 }
 
 void write_ble(uint32_t data){
