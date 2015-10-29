@@ -33,10 +33,11 @@ All text above, and the splash screen below must be included in any redistributi
 #define ADAFRUITBLE_RST 9
 
 //Data from phone
-volatile uint8_t phone_data = 0;
-
+volatile uint8_t phone_data[8] = {0};
+volatile uint8_t phone_byte = 0;
+volatile int data_counter = 0;
 //Data from SAMG
-volatile uint8_t samg_data = 0;
+volatile uint8_t samg_data[8] = {0};
 
 //Predefined Arrays for Alert Messages
 uint8_t ble_seizure[14] = {'S', 'E', 'I', 'Z',
@@ -51,7 +52,11 @@ uint8_t ble_fall[11] = {'F', 'A', 'L', 'L',
 uint8_t ble_unconscious[14] = {'C', 'R', 'I', 'T',
                                'I', 'C', 'A', 'L',
                                ' ', 'F', 'A', 'L', 
-                               'L', '!'};                          
+                               'L', '!'};
+                                                  
+uint8_t ble_eda[5] = {'E', 'D', 'A', 0, 0};
+
+
 
 Adafruit_BLE_UART BTLEserial = Adafruit_BLE_UART(ADAFRUITBLE_REQ, ADAFRUITBLE_RDY, ADAFRUITBLE_RST);
 /**************************************************************************/
@@ -69,7 +74,7 @@ void setup(void)
   while(!Serial); // Leonardo/Micro should wait for serial init
   Serial.println(F("Adafruit Bluefruit Low Energy nRF8001 Print echo demo"));
 
-  // BTLEserial.setDeviceName("NEWNAME"); /* 7 characters max! */
+  BTLEserial.setDeviceName("Wrist"); /* 7 characters max! */
 
   BTLEserial.begin();
 }
@@ -112,14 +117,32 @@ void loop()
 //    }
     // OK while we still have something to read, get a character and print it out
     while (BTLEserial.available()) {
-      phone_data = BTLEserial.read();
-//      Serial.print(phone_data);
-    }
+      phone_data[phone_byte] = BTLEserial.read();
 
-    uint8_t samg_data_bytes[1];
-    samg_data_bytes[0] = samg_data;
-    BTLEserial.write(samg_data_bytes, 1);
-    
+      if(phone_data[phone_byte] == 'a'){
+        digitalWrite(7, HIGH);
+      }
+      Serial.print(phone_data[phone_byte]);
+      phone_byte++;
+    }
+   phone_byte = 0;
+
+//    uint8_t samg_data_bytes[1];
+//    samg_data_bytes[0] = samg_data;
+//    BTLEserial.write(samg_data_bytes, 1);
+
+      //use dummy array to force data type to match BLE argument type (uint8_t)
+      //also to ensure data is not overwritten by i2c ISR
+      uint8_t samg_data_bytes[8];
+      int counter = 0;
+
+      for(counter = 0; counter < 8; counter++){
+
+        samg_data_bytes[counter]= (uint8_t) samg_data[counter];
+      }
+      
+ //     BTLEserial.write(samg_data_bytes, 8);
+      
 //    switch(samg_data) {
 //
 //      //seizure detected
@@ -149,16 +172,24 @@ void loop()
 // this function is registered as an event, see setup()
 void receiveEvent(int howMany)
 {
-  while (Wire.available()) // loop through all
-  {
-    samg_data = Wire.read();    // receive byte as an integer    
+  uint8_t element = 0;
+
+  while(Wire.available()){
+    samg_data[element] = Wire.read();    // receive byte as an integer 
+    element++;
   }
 }
 
 void requestEvent()
 {
-  Wire.write(phone_data); //respond with 1 bytes
-  phone_data = 0;
+  Wire.write(phone_data[data_counter]); //respond with 1 bytes
+  if(data_counter == 7){
+    data_counter = 0;
+  }
+  else{
+    data_counter++;
+  }
+//  phone_data = 0;
 //  Serial.println(phone_data);
 }
 
