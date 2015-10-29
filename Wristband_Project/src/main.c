@@ -74,7 +74,7 @@ void fall_detector(void);
 void TC0_Handler(void){
 
 	//toggle PA29 pin to check ISR timing
-	pioA_ptr->PIO_CODR |= PIO_CODR_P29;
+	pioA_ptr->PIO_SODR |= PIO_CODR_P29;
 
 		//ADXL initialization timer
 	if(spi_init_timer != 100){
@@ -117,22 +117,22 @@ void TC0_Handler(void){
 		sensor_data[7] = 69;
 		write_mult_ble(sensor_data, 8);
 		
-		for(data_counter = 0; data_counter < 7; data_counter++){
-			ble_data[data_counter] = read_ble();
-		}	  
+// 		for(data_counter = 0; data_counter < 7; data_counter++){
+// 			ble_data[data_counter] = read_ble();
+// 		}	  
  	}	
 	
 	//run fall detection algorithm
 	fall_detector();
-	if(ble_data[0] == 'a'){
-		//set LED pin PA6 as low (LED is active low)
-		pioA_ptr->PIO_CODR |= PIO_PA6;
-		speaker_state = 0;	
-	}
-	else if(ble_data[0] = 'b'){
-		
-		speaker_state = 3;
-	}
+// 	if(ble_data[0] == 'a'){
+// 		//set LED pin PA6 as low (LED is active low)
+// 		pioA_ptr->PIO_CODR |= PIO_PA6;
+// 		speaker_state = 0;	
+// 	}
+// 	else if(ble_data[0] == 'b'){
+// 		
+// 		speaker_state = 3;
+// 	}
 	
 // 	if(ble_data == 3){
 // 		//set LED pin PA6 as low (LED is active low)
@@ -144,25 +144,26 @@ void TC0_Handler(void){
 // // 		pioA_ptr->PIO_SODR |= PIO_PA6;
 // // 		speaker_state = 3;
 // // 	}
-	//Beep speaker on 0.25 seconds, off 0.25 seconds
-	if(speaker_rhythm != 125 && speaker_state != 3){
-		speaker_rhythm++;
-	}
-	else{
-		if(speaker_state == 0){
-			
-			//Enable TIOA1 (max volume) aka enable tc clock & start tc
-			tc_ptr->TC_CHANNEL[1].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;
-			speaker_state = 1;
-		}
-		else if(speaker_state == 1){
-			
-			//disable speaker
-			tc_ptr->TC_CHANNEL[1].TC_CCR = TC_CCR_CLKDIS;
-			speaker_state = 0;
-		}
-		speaker_rhythm = 0;
-	}
+
+// 	//Beep speaker on 0.25 seconds, off 0.25 seconds
+// 	if(speaker_rhythm != 125 && speaker_state != 3){
+// 		speaker_rhythm++;
+// 	}
+// 	else{
+// 		if(speaker_state == 0){
+// 			
+// 			//Enable TIOA1 (max volume) aka enable tc clock & start tc
+// 			tc_ptr->TC_CHANNEL[1].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;
+// 			speaker_state = 1;
+// 		}
+// 		else if(speaker_state == 1){
+// 			
+// 			//disable speaker
+// 			tc_ptr->TC_CHANNEL[1].TC_CCR = TC_CCR_CLKDIS;
+// 			speaker_state = 0;
+// 		}
+// 		speaker_rhythm = 0;
+// 	}
 	
 // 	//if ADC reads more than threshold, turn on buzzer
 // 	if( (eda_voltage > voltage_to_adc(2.1)) 
@@ -186,7 +187,7 @@ void TC0_Handler(void){
 	tc_ptr->TC_CHANNEL[0].TC_SR;
 	
 	//toggle PA29 pin to check timing
-	pioA_ptr->PIO_SODR |= PIO_SODR_P29;
+	pioA_ptr->PIO_CODR |= PIO_SODR_P29;
 }
 
 // void PIOA_Handler(void){
@@ -381,7 +382,7 @@ void init_tc0_channel0(void){
 	//Enable TC0 Interrupt in NVIC
 	NVIC_DisableIRQ(TC0_IRQn);
 	NVIC_ClearPendingIRQ(TC0_IRQn);
-	NVIC_SetPriority(TC0_IRQn, 1);
+	NVIC_SetPriority(TC0_IRQn, 0);
 	NVIC_EnableIRQ(TC0_IRQn);
 }
 
@@ -460,11 +461,11 @@ void init_ble_twi3(void){
 	//set device address: 0x08
 	twi3_ptr->TWI_MMR = TWI_MMR_DADR(0x08);
 	
-	//clock waveform generator (set to ~69kHz data rate)
+	//clock waveform generator (set to ~138kHz data rate)
 	twi3_ptr->TWI_CWGR = TWI_CWGR_BRSRCCLK_PMC_PCK
 						 | TWI_CWGR_CHDIV(0x01)
 						 | TWI_CWGR_CLDIV(0x01)
-						 | TWI_CWGR_CKDIV(0x05);
+						 | TWI_CWGR_CKDIV(0x04);
 						 
 	//disable slave mode, disable high speed mode
 	twi3_ptr->TWI_CR = TWI_CR_SVDIS | TWI_CR_HSDIS;	
@@ -595,31 +596,31 @@ void init_adxl_spi0(void){
 	 
 // 	//enable PIO control of PB09 for use as input for INT1
 // 	//enable PIO control of PA26 for use as input for INT2
-// 	pioB_ptr->PIO_PER |= PIO_PB9;
+ 	pioB_ptr->PIO_PER |= PIO_PB9;
 // 	pioA_ptr->PIO_PER |= PIO_PA26;
 // 	
 // 	//disable output on PB9
 // 	//disable output on PA26
-// 	pioB_ptr->PIO_ODR |= PIO_PB9;
+ 	pioB_ptr->PIO_ODR |= PIO_PB9;
 // 	pioA_ptr->PIO_ODR |= PIO_PA26;
 // 	
 // 	//enable interrupt on PB09
 // 	//enable interrupt on PA26
-// 	pioB_ptr->PIO_IER |= PIO_PB9;
+ 	pioB_ptr->PIO_IER |= PIO_PB9;
 // 	pioA_ptr->PIO_IER |= PIO_PA26;
 // 	
 // 	//enable additional interrupt settings for PB09
 // 	//enable additional interrupt settings for PA26
-// 	pioB_ptr->PIO_AIMER |= PIO_PB9;
+ 	pioB_ptr->PIO_AIMER |= PIO_PB9;
 // 	pioA_ptr->PIO_AIMER |= PIO_PA26;
 // 	
 // 	//enable edge detection for PB09
-// 	pioB_ptr->PIO_ESR |= PIO_PB9;
+ 	pioB_ptr->PIO_ESR |= PIO_PB9;
 // 	pioA_ptr->PIO_ESR |= PIO_PA26;
 // 	
 // 	//set to detect rising edge for PB09 (INT1)
 // 	//set to detect rising edge for PA26 (INT2)
-// 	pioB_ptr->PIO_REHLSR |= PIO_PB9;
+ 	pioB_ptr->PIO_REHLSR |= PIO_PB9;
 // 	pioA_ptr->PIO_REHLSR |= PIO_PA26;
 	
 	//disable PIO control of PA09, PB00, PA26, & PA10
@@ -658,11 +659,11 @@ void init_adxl_spi0(void){
 	//clear CSAAT (programmable clock source)
 	spi0_ptr->SPI_CSR[0] &= ~SPI_CSR_CSAAT;
 	
-// 	//enable PIOB interrupt for data ready interrupt (INT1) in NVIC
-// 	NVIC_DisableIRQ(PIOB_IRQn);
-// 	NVIC_ClearPendingIRQ(PIOB_IRQn);
-// 	NVIC_SetPriority(PIOB_IRQn, 0);
-// 	NVIC_EnableIRQ(PIOB_IRQn);
+	//enable PIOB interrupt for data ready interrupt (INT1) in NVIC
+	NVIC_DisableIRQ(PIOB_IRQn);
+	NVIC_ClearPendingIRQ(PIOB_IRQn);
+	NVIC_SetPriority(PIOB_IRQn, 0);
+	NVIC_EnableIRQ(PIOB_IRQn);
 // 
 // 	//enable PIOA interrupt for freefall (INT2) in NVIC
 // 	NVIC_DisableIRQ(PIOA_IRQn);
@@ -995,6 +996,8 @@ uint32_t ppg_measurement(void){
 float skin_conductance(uint32_t adc_reading){
 
 //code modified from EDA sensor from E-Health Kit
+//originally on Arduino/Raspberry platform
+//modified for SAMG55
 /*
  *  eHealth sensor platform for Arduino and Raspberry from Cooking-hacks.
  *
