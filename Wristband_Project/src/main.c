@@ -25,7 +25,7 @@ volatile uint16_t conductance_value = 0;
 //volatile uint32_t ppg_counter = 0;
 
 //bluetooth data
-volatile uint8_t ble_data[8] = {0};
+volatile uint8_t ble_data[8] = {11, 22, 33, 44, 55, 66, 77, 88};
 volatile uint8_t sensor_data[8] = {0};
 	
 volatile uint32_t spi_init_timer = 0;	
@@ -43,8 +43,10 @@ volatile uint8_t fall_alert = 0;
 volatile int speaker_rhythm = 0;
 volatile int speaker_state = 0;
 volatile int data_counter = 0;
+volatile int clear_tc = 0;
 
 //function prototypes
+void disable_wdt(void);
 void enable_pio_clk(void);
 void enable_tc0_channel0_clk(void);
 void enable_tc0_channel1_clk(void);
@@ -73,25 +75,33 @@ void fall_detector(void);
 //main sensor timer interrupt (sample rate = 1kHz)
 void TC0_Handler(void){
 
-	//toggle PA29 pin to check ISR timing
-	pioA_ptr->PIO_SODR |= PIO_CODR_P29;
+// 	//toggle PB11 pin to check ISR timing
+ 	pioB_ptr->PIO_SODR |= PIO_CODR_P11;
+// 	 if(pioB_ptr->PIO_PDSR & PIO_PDSR_P11){
+// 		 pioA_ptr->PIO_SODR |= PIO_CODR_P29;
+// 	 }
+// 	
 
+//	pioA_ptr->PIO_CODR |= PIO_CODR_P29;
+	
 		//ADXL initialization timer
-	if(spi_init_timer != 100){
+	if(spi_init_timer != 1000){
 		spi_init_timer++;
 	}
 	else {
 		spi_init_begin = 1;
+//		ble_ready = 1;
 	}
-	
+
 	//get adc channels 0 & 1 current reading
 	adc_ptr->ADC_CR = ADC_CR_START;
 	eda_voltage = adc_ptr->ADC_CDR[0];
  	emg_voltage = adc_ptr->ADC_CDR[1];
-// 	ecg_voltage = adc_ptr->ADC_CDR[2];
+//	ecg_voltage = adc_ptr->ADC_CDR[2];
 	
 	conductance_value = (uint16_t) skin_conductance(eda_voltage);
-	
+// 	//toggle PA29 pin to check ISR timing
+// 	pioA_ptr->PIO_SODR |= PIO_CODR_P29;	
 	//get accel. data
   	if (spi_init_complete == 1){
 		if(adxl_data_ready == 1){
@@ -101,29 +111,36 @@ void TC0_Handler(void){
 		//assume interrupt occurred, check source
 		adxl_irq_source = read_adxl(0x30, 0x00);
   	}
+	 //run fall detection algorithm
+	fall_detector();
+//	pioA_ptr->PIO_CODR |= PIO_SODR_P29;		
 	
 	//update bluetooth data from phone (via arduino)
 	//send data to phone, if any available
- 	if(ble_ready == 1){
- //		ble_data = read_ble();
+  	if(ble_ready == 1){
+//  //		ble_data = read_ble();
+// //		update_ble_data();
+// 		sensor_data[0] = 77;
+// 		sensor_data[1] = 44;
+// 		sensor_data[2] = 33;
+// 		sensor_data[3] = 22;
+// 		sensor_data[4] = 11;
+// 		sensor_data[5] = 88;
+// 		sensor_data[6] = 99;
+// 		sensor_data[7] = 66;
+		//toggle PA29 pin to check ISR timing
+//		pioA_ptr->PIO_SODR |= PIO_CODR_P29;		
+///		write_mult_ble(sensor_data, 8);
+//		ble_data[0] = read_ble();
 //		update_ble_data();
-		sensor_data[0] = fall_alert;
-		sensor_data[1] = conductance_value >> 8;
-		sensor_data[2] = conductance_value;
-		sensor_data[3] = emg_voltage >> 8;
-		sensor_data[4] = emg_voltage;
-//		sensor_data[5] = ecg_voltage >> 8;
-//		sensor_data[6] = ecg_voltage;
-		sensor_data[7] = 69;
-		write_mult_ble(sensor_data, 8);
-		
+		//toggle PA29 pin to check timing
+//		pioA_ptr->PIO_CODR |= PIO_SODR_P29;
 // 		for(data_counter = 0; data_counter < 7; data_counter++){
 // 			ble_data[data_counter] = read_ble();
-// 		}	  
- 	}	
+ 		}	  
+// 	}	
 	
-	//run fall detection algorithm
-	fall_detector();
+
 // 	if(ble_data[0] == 'a'){
 // 		//set LED pin PA6 as low (LED is active low)
 // 		pioA_ptr->PIO_CODR |= PIO_PA6;
@@ -186,9 +203,10 @@ void TC0_Handler(void){
 	//clear TC0 interrupt flags
 	tc_ptr->TC_CHANNEL[0].TC_SR;
 	
-	//toggle PA29 pin to check timing
-	pioA_ptr->PIO_CODR |= PIO_SODR_P29;
+	//toggle PB11 pin to check timing
+	pioB_ptr->PIO_CODR |= PIO_SODR_P11;
 }
+
 
 // void PIOA_Handler(void){
 // 
@@ -241,8 +259,10 @@ int main (void)
 	//Uses EXTERNAL crystal oscillator
 	//can be switched by redefining "CONFIG_SYSCLK_SOURCE"
 	//see conf_clock.h for possible clock sources
+
 	sysclk_init();
-	init_pio();
+	disable_wdt();
+	init_pio();	
 	init_tc0_channel0();
 	init_tc0_channel1();
 	init_adc();
@@ -252,6 +272,12 @@ int main (void)
 	
 	//empty while loop to run SAMG55 indefinitely
 	while (1) {}
+}
+
+void disable_wdt(void){
+	
+	//disable watchdog timer
+	WDT->WDT_MR = WDT_MR_WDDIS;
 }
 
 void enable_pio_clk(void){
@@ -319,6 +345,9 @@ void init_pio(void){
 	
 	//enable pin PA29 as output (Debugging)
 	pioA_ptr->PIO_OER |= PIO_PA29;
+	
+	//enable pin PB11 as output (debugging)
+//	pioB_ptr->PIO_OER |= PIO_PB11;
 
 	//set LED pin PA6 as high (LED is active low)
 	pioA_ptr->PIO_SODR |= PIO_PA6;
@@ -359,7 +388,7 @@ void init_tc0_channel0(void){
 	tc_ptr->TC_CHANNEL[0].TC_CMR = 
 		TC_CMR_WAVE						//set TC for wave mode
 		| TC_CMR_WAVSEL_UP_RC			//count up to RC value
-		| TC_CMR_TCCLKS_TIMER_CLOCK1	// = 120Mhz (Master Clock) * (1/2)
+		| TC_CMR_TCCLKS_TIMER_CLOCK2	// = 120Mhz (Master Clock) * (1/2)
 		| TC_CMR_EEVT_XC0				//set xc0 so TIOB is not used as input
 		| TC_CMR_ACPA_SET				//set PA0 on RA match
 		| TC_CMR_ACPC_CLEAR				//clear PA0 on RC match
@@ -367,19 +396,20 @@ void init_tc0_channel0(void){
 		| TC_CMR_BCPC_CLEAR;			//clear PA1 on RC match
 	
 	//set period & duty cycle (RC value = (120Mhz * prescaler)/(goal frequency))
-	tc_ptr->TC_CHANNEL[0].TC_RA = 0x7530; //duty cycle for TIOA
-//	tc0_ptr->TC_CHANNEL[0].TC_RB = 0x7530; //duty cycle for TIOB
-	tc_ptr->TC_CHANNEL[0].TC_RB = 0x0000; //duty cycle for TIOB	
-	tc_ptr->TC_CHANNEL[0].TC_RC = 0xEA60; //period (for TIOA & TIOB)
+// 	tc_ptr->TC_CHANNEL[0].TC_RA = 0x7530; //duty cycle for TIOA
+// 	tc_ptr->TC_CHANNEL[0].TC_RB = 0x0000; //duty cycle for TIOB	
+// 	tc_ptr->TC_CHANNEL[0].TC_RC = 0xEA60; //period (for TIOA & TIOB)
+	tc_ptr->TC_CHANNEL[0].TC_RA = 0x3A98;
+	tc_ptr->TC_CHANNEL[0].TC_RC = 0x7530;
 	
 	//enable interrupt on RC compare match
-	tc_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
+	tc_ptr->TC_CHANNEL[0].TC_IER = TC_IER_CPAS;
 	
 	//enable tc clock & start tc
 	tc_ptr->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;	
 	/*End TC0 Setup*/	
 	
-	//Enable TC0 Interrupt in NVIC
+// 	//Enable TC0 Interrupt in NVIC
 	NVIC_DisableIRQ(TC0_IRQn);
 	NVIC_ClearPendingIRQ(TC0_IRQn);
 	NVIC_SetPriority(TC0_IRQn, 0);
@@ -436,7 +466,7 @@ void init_adc(void){
 	adc_ptr->ADC_CHER = ADC_CHER_CH1;
 	
 	//enable ADC channel 2 (PA19 - Heart rate sensor)
-//	adc_ptr->ADC_CHER = ADC_CHER_CH2;
+	adc_ptr->ADC_CHER = ADC_CHER_CH2;
 
 	enable_adc_clk();	
 }
@@ -461,11 +491,11 @@ void init_ble_twi3(void){
 	//set device address: 0x08
 	twi3_ptr->TWI_MMR = TWI_MMR_DADR(0x08);
 	
-	//clock waveform generator (set to ~138kHz data rate)
+	//clock waveform generator (set to ~139kHz data rate)
 	twi3_ptr->TWI_CWGR = TWI_CWGR_BRSRCCLK_PMC_PCK
-						 | TWI_CWGR_CHDIV(0x01)
-						 | TWI_CWGR_CLDIV(0x01)
-						 | TWI_CWGR_CKDIV(0x04);
+						 | TWI_CWGR_CHDIV(0x04)
+						 | TWI_CWGR_CLDIV(0x04)
+						 | TWI_CWGR_CKDIV(0x02);
 						 
 	//disable slave mode, disable high speed mode
 	twi3_ptr->TWI_CR = TWI_CR_SVDIS | TWI_CR_HSDIS;	
@@ -473,9 +503,9 @@ void init_ble_twi3(void){
 	enable_twi3_clk();
 	
 	//enable master mode
-	twi3_ptr->TWI_CR |= TWI_CR_MSEN;
+	twi3_ptr->TWI_CR |= TWI_CR_MSEN;	
 	
-	ble_ready = 1;	 
+	ble_ready = 1; 
 }
 
 void write_ble(uint32_t data){
@@ -543,6 +573,7 @@ uint32_t read_ble(void){
 
 void update_ble_data(void){
 	
+	//element counter
 	uint32_t ble_byte = 0;
 	
 	//set master to read mode (MREAD = 1)
@@ -662,7 +693,7 @@ void init_adxl_spi0(void){
 	//enable PIOB interrupt for data ready interrupt (INT1) in NVIC
 	NVIC_DisableIRQ(PIOB_IRQn);
 	NVIC_ClearPendingIRQ(PIOB_IRQn);
-	NVIC_SetPriority(PIOB_IRQn, 0);
+	NVIC_SetPriority(PIOB_IRQn, 1);
 	NVIC_EnableIRQ(PIOB_IRQn);
 // 
 // 	//enable PIOA interrupt for freefall (INT2) in NVIC
