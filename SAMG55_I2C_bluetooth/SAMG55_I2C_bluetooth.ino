@@ -17,6 +17,7 @@ All text above, and the splash screen below must be included in any redistributi
  Modified by Carlos Hernandez
  San Jose State University Fall 2015
  Wristband Bluetooth Firmware
+ Modified for Tinyduino
  */
 
 
@@ -33,9 +34,10 @@ All text above, and the splash screen below must be included in any redistributi
 #define ADAFRUITBLE_RST 9
 
 //Data from phone
-volatile uint8_t phone_data[8] = {0};
+volatile byte phone_data[8] = {0};
 volatile uint8_t phone_byte = 0;
 volatile int data_counter = 0;
+
 //Data from SAMG
 volatile uint8_t samg_data[8] = {0};
 volatile int element = 0;
@@ -91,83 +93,73 @@ aci_evt_opcode_t laststatus = ACI_EVT_DISCONNECTED;
 void loop()
 {
   delay(1000);
-//  // Tell the nRF8001 to do whatever it should be working on.
-//  BTLEserial.pollACI();
+  // Tell the nRF8001 to do whatever it should be working on.
+  BTLEserial.pollACI();
+
+  // Ask what is our current status
+  aci_evt_opcode_t status = BTLEserial.getState();
+  // If the status changed....
+  if (status != laststatus) {
+    // print it out!
+    if (status == ACI_EVT_DEVICE_STARTED) {
+        Serial.println(F("* Advertising started"));
+    }
+    if (status == ACI_EVT_CONNECTED) {
+        Serial.println(F("* Connected!"));
+    }
+    if (status == ACI_EVT_DISCONNECTED) {
+        Serial.println(F("* Disconnected or advertising timed out"));
+    }
+    // OK set the last status change to this one
+    laststatus = status;
+  }
+
+  if (status == ACI_EVT_CONNECTED) {
+    // OK while we still have something to read, get a character
+    while (BTLEserial.available()) {
+      phone_data[phone_byte] = BTLEserial.read();
+      phone_byte++;
+    }
+   phone_byte = 0;
+
+//    uint8_t samg_data_bytes[1];
+//    samg_data_bytes[0] = samg_data;
+//    BTLEserial.write(samg_data_bytes, 1);
+
+      //use dummy array to force data type to match BLE argument type (uint8_t)
+      //also to ensure data is not overwritten by i2c ISR
+      uint8_t samg_data_bytes[8];
+
+      for(int counter = 0; counter < 8; counter++){
+
+        samg_data_bytes[counter]= (uint8_t) samg_data[counter];
+      }
+      
+      BTLEserial.write(samg_data_bytes, 8);
+      
+//    switch(samg_data) {
 //
-//  // Ask what is our current status
-//  aci_evt_opcode_t status = BTLEserial.getState();
-//  // If the status changed....
-//  if (status != laststatus) {
-//    // print it out!
-//    if (status == ACI_EVT_DEVICE_STARTED) {
-//        Serial.println(F("* Advertising started"));
+//      //seizure detected
+//      case 1:
+//        BTLEserial.write(ble_seizure, 14);
+//        samg_data = 0;        
+//        break;
+//
+//      //fall detected
+//      case 2:
+//        BTLEserial.write(ble_fall, 11);
+//        samg_data = 0; 
+//        break;
+//
+//      //critical fall detected  
+//      case 3:
+//        BTLEserial.write(ble_unconscious, 14);
+//        samg_data = 0;
+//      default:
+//        break;
+//        
 //    }
-//    if (status == ACI_EVT_CONNECTED) {
-//        Serial.println(F("* Connected!"));
-//    }
-//    if (status == ACI_EVT_DISCONNECTED) {
-//        Serial.println(F("* Disconnected or advertising timed out"));
-//    }
-//    // OK set the last status change to this one
-//    laststatus = status;
-//  }
-//
-//  if (status == ACI_EVT_CONNECTED) {
-//    // Lets see if there's any data for us!
-////    if (BTLEserial.available()) {
-////      Serial.print("* "); Serial.print(BTLEserial.available()); Serial.println(F(" bytes available from BTLE"));
-////    }
-//    // OK while we still have something to read, get a character and print it out
-//    while (BTLEserial.available()) {
-//      phone_data[phone_byte] = BTLEserial.read();
-//
-//      if(phone_data[phone_byte] == 'a'){
-//        digitalWrite(7, HIGH);
-//      }
-//      Serial.print(phone_data[phone_byte]);
-//      phone_byte++;
-//    }
-//   phone_byte = 0;
-//
-////    uint8_t samg_data_bytes[1];
-////    samg_data_bytes[0] = samg_data;
-////    BTLEserial.write(samg_data_bytes, 1);
-//
-//      //use dummy array to force data type to match BLE argument type (uint8_t)
-//      //also to ensure data is not overwritten by i2c ISR
-//      uint8_t samg_data_bytes[8];
-//      int counter = 0;
-//
-//      for(counter = 0; counter < 8; counter++){
-//
-//        samg_data_bytes[counter]= (uint8_t) samg_data[counter];
-//      }
-//      
-// //     BTLEserial.write(samg_data_bytes, 8);
-//      
-////    switch(samg_data) {
-////
-////      //seizure detected
-////      case 1:
-////        BTLEserial.write(ble_seizure, 14);
-////        samg_data = 0;        
-////        break;
-////
-////      //fall detected
-////      case 2:
-////        BTLEserial.write(ble_fall, 11);
-////        samg_data = 0; 
-////        break;
-////
-////      //critical fall detected  
-////      case 3:
-////        BTLEserial.write(ble_unconscious, 14);
-////        samg_data = 0;
-////      default:
-////        break;
-////        
-////    }
-//  }
+  }
 }
 
 // function that executes whenever data is received from master
@@ -177,7 +169,7 @@ void receiveEvent(int howMany)
   element = 0;
   
   while(Wire.available()){
-    Serial.println(samg_data[element]);
+//    Serial.println(samg_data[element]);
     samg_data[element] = Wire.read();    // receive byte as an integer 
     element++;
   }
@@ -187,22 +179,23 @@ void requestEvent()
 {
 
   //recast as byte so twi function accepts arguments
-//  byte twi_data[8] = {0x00};  
+  byte twi_data[8] = {0x00};  
 //  byte twi_data[8] = {'c', 'a', 'r', 'l', 'o', 's', 'a', 'h'};
 //   byte twi_data[8] = {11, 22, 33, 0x00, 0xFF, 0x00, 0xFF, 0x00};
-//  for(int i = 0; i < 8; i++){
-//    twi_data[i] = phone_data[i];
-//  }
-//  byte test_data = 0xFF;
-  byte test_data;
-  test_data = test_element;
-  Wire.write(test_data); //respond with 8 bytes
-  Serial.println(test_data);
-  test_element++;
-  if(test_element == 200){
-    test_element = 0;
-    Serial.println("1s elapsed");
+  for(int i = 0; i < 8; i++){
+    twi_data[i] = phone_data[i];
+    phone_data[i] = 0;
   }
+//  byte test_data = 0xFF;
+//  byte test_data;
+//  test_data = test_element;
+  Wire.write(twi_data, 8); //respond with 8 bytes
+//  Serial.println(test_data);
+//  test_element++;
+//  if(test_element == 200){
+//    test_element = 0;
+//    Serial.println("1s elapsed");
+//  }
 //  phone_data = 0;
 
 }
